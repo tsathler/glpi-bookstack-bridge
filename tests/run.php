@@ -42,6 +42,45 @@ $assert = static function (bool $condition, string $message) use (&$assertions):
     $assertions++;
 };
 
+$template = file_get_contents(__DIR__ . '/../templates/config.html.twig');
+$assert(is_string($template), 'Configuration Twig template is readable.');
+$assert(
+    preg_match('/\{\%\s*extends\s+["\']layout\/page_without_tabs\.html\.twig["\']\s*\%\}/', $template) === 1,
+    'Configuration template extends the GLPI 11 page layout.'
+);
+$assert(
+    str_contains($template, '{% block content_title %}') && str_contains($template, '{% block content_body %}'),
+    'Configuration template overrides the GLPI page title and body blocks.'
+);
+$assert(substr_count($template, 'csrf_token()') === 3, 'All three POST forms retain CSRF tokens.');
+
+$glpiRoot = getenv('GLPI_ROOT');
+if (is_string($glpiRoot) && $glpiRoot !== '') {
+    $layoutPath = $glpiRoot . '/templates/layout/page_without_tabs.html.twig';
+    $autoloadPath = $glpiRoot . '/vendor/autoload.php';
+    $assert(is_file($layoutPath), 'GLPI_ROOT contains the page layout used by the plugin.');
+    $assert(is_file($autoloadPath), 'GLPI_ROOT contains the Composer autoloader needed for Twig rendering.');
+    require_once $autoloadPath;
+
+    $loader = new Twig\Loader\FilesystemLoader($glpiRoot . '/templates');
+    $loader->addPath(__DIR__ . '/../templates', 'bookstackbridge');
+    $twig = new Twig\Environment($loader, ['autoescape' => 'html']);
+    $twig->addFunction(new Twig\TwigFunction('get_current_interface', static fn (): string => 'central'));
+    $twig->addFunction(new Twig\TwigFunction('call', static fn (...$arguments): null => null));
+    $twig->addFunction(new Twig\TwigFunction('path', static fn (string $route): string => '/' . $route));
+    $twig->addFunction(new Twig\TwigFunction('csrf_token', static fn (): string => 'test-token'));
+    $twig->addFunction(new Twig\TwigFunction('__', static fn (string $message, ?string $domain = null): string => $message));
+    $rendered = $twig->render('@bookstackbridge/config.html.twig', [
+        'config' => ['base_url' => '', 'api_token_id' => ''],
+        'result' => null,
+        'error' => null,
+        'notice' => null,
+        'query' => '',
+    ]);
+    $assert(str_contains($rendered, 'BookStack connection'), 'Configuration page renders through the real GLPI layout.');
+    $assert(str_contains($rendered, 'BookStack HTTPS URL'), 'Rendered page includes the configuration form.');
+}
+
 $menu = Menu::getMenuContent();
 $assert($menu['title'] === 'BookStack knowledge base', 'Menu builds successfully with GLPI global classes.');
 $assert($menu['page'] === '/plugins/bookstackbridge/', 'Menu points to the plugin route.');

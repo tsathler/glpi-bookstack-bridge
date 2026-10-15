@@ -1,8 +1,9 @@
-{% extends 'layout/page.html.twig' %}
+{% extends 'layout/page_without_tabs.html.twig' %}
 
-{% block content %}
-<main class="container-fluid mt-3" id="bookstackbridge">
-  <h1>{{ __('BookStack connection', 'bookstackbridge') }}</h1>
+{% block content_title %}{{ __('BookStack connection', 'bookstackbridge') }}{% endblock %}
+
+{% block content_body %}
+<main id="bookstackbridge">
   {% if notice %}<div class="alert alert-info" role="status">{{ notice }}</div>{% endif %}
   {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
   <section class="card mb-4">
