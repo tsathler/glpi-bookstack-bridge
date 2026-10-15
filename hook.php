@@ -4,6 +4,7 @@ function plugin_bookstackbridge_install(): bool
 {
     Config::setConfigurationValues('plugin:bookstackbridge', [
         'base_url' => '',
+        'allowed_private_ips' => '',
         'api_token_id' => '',
         'api_token' => '',
     ]);

@@ -42,7 +42,7 @@ Never deploy, push, or modify a remote server without explicit authorization. Do
 - Keep GLPI session checks and authorization on every route. The current M0 screen is restricted to users with GLPI configuration update rights. Do not treat a hidden menu entry as authorization.
 - Preserve GLPI CSRF protection for state-changing and form-submission routes.
 - BookStack authorization belongs to the API token's user and BookStack role/content permissions. Use a dedicated, least-privileged read-only account; never assume the token grants safe access to all content for every GLPI user.
-- Prevent SSRF: validate configured URLs, accept HTTPS only, reject unsafe destinations, verify TLS certificates, set timeouts, and do not follow redirects. The current policy blocks private and reserved addresses. Compatibility with internal/private BookStack infrastructure must be explicitly reviewed before deployment; do not remove these protections indiscriminately or silently.
+- Prevent SSRF: validate configured URLs, accept HTTPS only on port 443, verify TLS certificates/SAN, set timeouts, disable redirects and proxy use, validate all DNS A/AAAA results, and pin the selected validated address with `CURLOPT_RESOLVE`. Private RFC1918/ULA addresses remain blocked unless each exact IP is explicitly allowlisted by an administrator; do not allow CIDR ranges or hostnames. Loopback, link-local, metadata, multicast, and reserved destinations must remain blocked even if submitted to the allowlist. Review internal/private BookStack compatibility before deployment; do not remove these protections indiscriminately or silently.
 - Treat BookStack content and API previews as untrusted. Escape output by default and sanitize HTML before any future rich-content rendering. Do not mark remote HTML safe in Twig without a well-defined sanitizer and tests.
 - Validate request parameters and bound page sizes, query lengths, and other inputs.
 
@@ -97,7 +97,7 @@ Run relevant checks after code changes. Do not describe simulated checks as real
 ## Project Milestones
 
 - **M0 — Foundation and connectivity:** implemented locally; awaiting validation in real GLPI 11 and BookStack environments.
-- **M0.1 — Test-server adjustments and validation:** planned; requires the separate server and explicit authorization for remote changes.
+- **M0.1 — Internal-network safety:** exact private-IP authorization and DNS pinning are implemented locally; real validation still requires the separate GLPI/BookStack test environment and an authorized operator.
 - **M1 — BookStack interface and navigation:** planned; shelves, books, chapters, pages, reader, and safe content rendering.
 - **M2 — Integrated search:** planned expansion beyond the M0 experimental administrator-only search.
 - **M3 — Ticket linking:** planned association of BookStack articles with GLPI tickets, including authorization and persistence.

@@ -13,8 +13,13 @@
         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label" for="base_url">{{ __('BookStack HTTPS URL', 'bookstackbridge') }}</label>
-          <input class="form-control" id="base_url" name="base_url" type="url" required value="{{ config.base_url|default('') }}" placeholder="https://docs.example.org">
-          <div class="form-text">{{ __('HTTPS is required. Private and local addresses are rejected.', 'bookstackbridge') }}</div>
+          <input class="form-control" id="base_url" name="base_url" type="url" maxlength="2048" required value="{{ config.base_url|default('') }}" placeholder="https://docs.example.org">
+          <div class="form-text">{{ __('HTTPS with a trusted certificate is required. Private destinations need an exact IP allowlist entry.', 'bookstackbridge') }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="allowed_private_ips">{{ __('Allowed private destination IPs', 'bookstackbridge') }}</label>
+          <textarea class="form-control" id="allowed_private_ips" name="allowed_private_ips" rows="3" maxlength="4096" autocomplete="off">{{ config.allowed_private_ips|default('') }}</textarea>
+          <div class="form-text">{{ __('Optional. Enter one exact private IPv4 or IPv6 address per line. CIDR ranges, hostnames, loopback, link-local, metadata, multicast, and reserved addresses are not allowed.', 'bookstackbridge') }}</div>
         </div>
         <div class="mb-3">
           <label class="form-label" for="api_token_id">{{ __('API token ID', 'bookstackbridge') }}</label>

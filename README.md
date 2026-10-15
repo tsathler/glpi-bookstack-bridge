@@ -8,7 +8,8 @@ GLPI 11 plugin foundation for an authenticated, read-only connection to the Book
 - PHP 8.2 or newer, matching GLPI 11 requirements
 - PHP cURL and Sodium extensions
 - BookStack with API access enabled and a dedicated read-only user allowed to access the system API
-- HTTPS BookStack URL resolving only to public IP addresses
+- HTTPS BookStack URL on TCP 443 with a certificate trusted by the PHP/cURL runtime
+- Private BookStack destinations remain blocked unless each exact private IP is explicitly allowlisted by a GLPI administrator
 
 ## Install
 
@@ -20,11 +21,11 @@ The plugin uses GLPI 11's automatic plugin controller discovery and PSR-4 namesp
 
 Open **Tools → BookStack knowledge base** as a user with configuration update rights. Set the BookStack HTTPS URL, API token ID, and API token secret. Create the token for a dedicated BookStack account that has only the read permissions required by the integration plus the “Access System API” role permission. Save, then select **Check BookStack API**. The experimental search form submits a query to BookStack and shows returned results within GLPI.
 
-The secret is stored in GLPI's `plugin:bookstackbridge` configuration context and declared through GLPI's `secured_configs` hook, so GLPI encrypts it with its security key and can migrate it when that key changes. The plugin does not display the secret back in the form. Configure TLS correctly on the BookStack host; certificate verification remains enabled.
+The secret is stored in GLPI's `plugin:bookstackbridge` configuration context and declared through GLPI's `secured_configs` hook, so GLPI encrypts it with its security key and can migrate it when that key changes. The plugin does not display the secret back in the form. Private IP destinations can be authorized individually in **Allowed private destination IPs**. Enter one exact RFC1918 IPv4 or unique-local IPv6 address per line; CIDR ranges and hostnames are not accepted. DNS names resolving to private addresses require each private address returned by DNS to be listed. Loopback, link-local, metadata, multicast, and reserved destinations remain blocked. HTTPS certificate verification remains enabled and redirects are never followed. The plugin connects directly and ignores proxy environment settings so the validated IP can be pinned. See [Network configuration](docs/network-configuration.md) before enabling an internal destination.
 
 ## Development checks
 
-Run `php tests/run.php` for simulated HTTP response handling and URL policy checks. These tests do not connect to GLPI or a BookStack server. Run `php -l` on the PHP files when making changes. See [docs/development.md](docs/development.md) and [docs/architecture.md](docs/architecture.md).
+Run `php tests/run.php` for simulated HTTP response handling and URL policy checks. These tests do not connect to GLPI or a BookStack server. Run `php -l` on the PHP files when making changes. See [docs/development.md](docs/development.md), [docs/architecture.md](docs/architecture.md), and [network configuration](docs/network-configuration.md).
 
 ## Status and limits
 

@@ -10,6 +10,7 @@ use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
 use Session;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 
 final class ConfigController extends AbstractController
@@ -28,14 +29,22 @@ final class ConfigController extends AbstractController
         ]);
     }
 
-    #[Route('/configure', name: 'bookstackbridge_configure', methods: ['POST'])]
+    #[Route('/configure', name: 'bookstackbridge_configure', methods: ['GET', 'POST'])]
     public function configure(Request $request): Response
     {
         $this->requireAdmin();
+        $this->requirePost($request);
         $current = Config::getConfigurationValues(self::CONTEXT);
+        $submittedUrl = (string) $request->request->get('base_url', '');
+        $submittedAllowlist = (string) $request->request->get('allowed_private_ips', '');
         try {
-            $url = BaseUrlPolicy::validate((string) $request->request->get('base_url', ''));
+            $privateIpAllowlist = BaseUrlPolicy::parsePrivateIpAllowlist(
+                $submittedAllowlist
+            );
+            $url = BaseUrlPolicy::validate($submittedUrl, $privateIpAllowlist);
         } catch (BookStackException $e) {
+            $current['base_url'] = $submittedUrl;
+            $current['allowed_private_ips'] = $submittedAllowlist;
             return $this->renderPage($current, null, $e->getMessage(), '');
         }
         $tokenId = trim((string) $request->request->get('api_token_id', ''));
@@ -48,16 +57,18 @@ final class ConfigController extends AbstractController
         }
         Config::setConfigurationValues(self::CONTEXT, [
             'base_url' => $url,
+            'allowed_private_ips' => implode("\n", $privateIpAllowlist),
             'api_token_id' => $tokenId,
             'api_token' => $token,
         ]);
         return $this->renderPage(Config::getConfigurationValues(self::CONTEXT), null, null, 'Configuration saved.');
     }
 
-    #[Route('/test', name: 'bookstackbridge_test', methods: ['POST'])]
-    public function test(): Response
+    #[Route('/test', name: 'bookstackbridge_test', methods: ['GET', 'POST'])]
+    public function test(Request $request): Response
     {
         $this->requireAdmin();
+        $this->requirePost($request);
         try {
             $result = $this->client()->testConnection();
             return $this->renderPage(Config::getConfigurationValues(self::CONTEXT), $result, null, 'Connection successful.');
@@ -66,10 +77,11 @@ final class ConfigController extends AbstractController
         }
     }
 
-    #[Route('/search', name: 'bookstackbridge_search', methods: ['POST'])]
+    #[Route('/search', name: 'bookstackbridge_search', methods: ['GET', 'POST'])]
     public function search(Request $request): Response
     {
         $this->requireAdmin();
+        $this->requirePost($request);
         $query = trim((string) $request->request->get('query', ''));
         try {
             $result = $this->client()->search($query);
@@ -86,7 +98,9 @@ final class ConfigController extends AbstractController
         return new BookStackClient(
             (string) ($config['base_url'] ?? ''),
             (string) ($config['api_token_id'] ?? ''),
-            (string) ($config['api_token'] ?? '')
+            (string) ($config['api_token'] ?? ''),
+            null,
+            BaseUrlPolicy::parsePrivateIpAllowlist((string) ($config['allowed_private_ips'] ?? ''))
         );
     }
 
@@ -117,6 +131,13 @@ final class ConfigController extends AbstractController
     {
         if (!Session::haveRight('config', UPDATE)) {
             throw $this->createAccessDeniedException();
+        }
+    }
+
+    private function requirePost(Request $request): void
+    {
+        if (!$request->isMethod('POST')) {
+            throw new MethodNotAllowedHttpException(['POST']);
         }
     }
 }

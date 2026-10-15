@@ -52,6 +52,10 @@ $assert(
     str_contains($template, '{% block content_title %}') && str_contains($template, '{% block content_body %}'),
     'Configuration template overrides the GLPI page title and body blocks.'
 );
+$assert(
+    str_contains($template, 'name="allowed_private_ips"') && str_contains($template, 'maxlength="4096"'),
+    'Configuration form exposes a bounded private-IP allowlist field.'
+);
 $assert(substr_count($template, 'csrf_token()') === 3, 'All three POST forms retain CSRF tokens.');
 
 $glpiRoot = getenv('GLPI_ROOT');
@@ -157,5 +161,194 @@ try {
 } catch (BookStackException) {
     $assert(true, 'Rejects private IP addresses.');
 }
+
+$assert(BaseUrlPolicy::validate('https://1.1.1.1') === 'https://1.1.1.1', 'Accepts a public HTTPS IP address.');
+$assert(
+    BaseUrlPolicy::validate('https://10.20.30.40', ['10.20.30.40']) === 'https://10.20.30.40',
+    'Accepts an exact private IP explicitly present in the allowlist.'
+);
+$assert(
+    BaseUrlPolicy::validate('https://[fd12:3456::10]', ['fd12:3456::10']) === 'https://[fd12:3456::10]',
+    'Accepts an exact authorized private IPv6 destination.'
+);
+
+$expectPolicyFailure = static function (callable $callback, string $message) use ($assert): void {
+    try {
+        $callback();
+        $assert(false, $message);
+    } catch (BookStackException) {
+        $assert(true, $message);
+    }
+};
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://10.20.30.40'),
+    'Rejects a private address without allowlisting.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::parsePrivateIpAllowlist('10.20.30.0/24'),
+    'Rejects subnet ranges in the private allowlist.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::parsePrivateIpAllowlist('127.0.0.1'),
+    'Does not allow loopback destinations, even through the allowlist.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::parsePrivateIpAllowlist('169.254.10.20'),
+    'Does not allow link-local destinations, even through the allowlist.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://169.254.169.254', ['10.20.30.40']),
+    'Blocks metadata destinations.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://1.1.1.1:444'),
+    'Rejects non-standard HTTPS ports.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://1.1.1.1:65536'),
+    'Rejects out-of-range ports.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://localhost', ['10.20.30.40']),
+    'Rejects local hostnames.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://0x7f.0.0.1', ['10.20.30.40']),
+    'Rejects malformed numeric-style hostnames before DNS lookup.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://192.0.2.10', ['10.20.30.40']),
+    'Rejects documentation and reserved IP ranges.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://192.88.99.1', ['10.20.30.40']),
+    'Rejects deprecated special-purpose IPv4 ranges.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::validate('https://[3fff::1]', ['fd12:3456::10']),
+    'Rejects special-purpose IPv6 documentation ranges.'
+);
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::parsePrivateIpAllowlist('224.0.0.1'),
+    'Does not allow multicast destinations.'
+);
+
+$multiRecord = BaseUrlPolicy::resolve(
+    'https://docs.example.test',
+    '',
+    static fn (string $host): array => ['1.1.1.1', '8.8.8.8']
+);
+$assert($multiRecord['ip'] === '1.1.1.1', 'Checks every A/AAAA record and selects a validated address.');
+$privateHostname = BaseUrlPolicy::validate(
+    'https://bookstack.example.test',
+    ['10.20.30.40'],
+    static fn (string $host): array => ['10.20.30.40']
+);
+$assert(
+    $privateHostname === 'https://bookstack.example.test',
+    'Allows a DNS hostname only when its private destination IP is explicitly authorized.'
+);
+$multiAddress = BaseUrlPolicy::resolve(
+    'https://docs.example.test',
+    '',
+    static fn (string $host): array => ['1.1.1.1', '2606:4700:4700::1111']
+);
+$assert($multiAddress['ip'] === '1.1.1.1', 'Validates mixed IPv4 and IPv6 DNS answers before selecting one.');
+$expectPolicyFailure(
+    static fn () => BaseUrlPolicy::resolve(
+        'https://docs.example.test',
+        ['10.20.30.40'],
+        static fn (string $host): array => ['1.1.1.1', '10.20.30.41']
+    ),
+    'Rejects a hostname if any private DNS result is not explicitly allowed.'
+);
+
+$resolveCalls = 0;
+$observedOptions = [];
+$pinnedClient = new BookStackClient(
+    'https://kb.example.test',
+    'id',
+    'secret',
+    static function (string $url, array $headers, array $options) use (&$observedOptions): array {
+        $observedOptions = $options;
+        return ['status' => 200, 'body' => '{"data":[],"total":0}'];
+    },
+    ['10.20.30.40'],
+    static function (string $host) use (&$resolveCalls): array {
+        $resolveCalls++;
+        return $resolveCalls === 1 ? ['10.20.30.40'] : ['169.254.169.254'];
+    }
+);
+$pinnedClient->search('safe query');
+$assert($resolveCalls === 1, 'DNS is resolved once per client and is not re-resolved during a request.');
+$assert($observedOptions['resolve'] === 'kb.example.test:443:10.20.30.40', 'HTTP transport pins the validated hostname to its validated IP.');
+$assert(
+    $observedOptions['verify_peer'] === true && $observedOptions['verify_host'] === 2
+        && $observedOptions['follow_redirects'] === false && $observedOptions['proxy'] === false,
+    'Pinned requests retain full TLS verification, disable redirects, and bypass unpinned proxies.'
+);
+
+$expectPolicyFailure(
+    static fn () => (new BookStackClient(
+        'https://kb.example.test',
+        'id',
+        'secret',
+        null,
+        ['10.20.30.40'],
+        static fn (string $host): array => ['10.20.30.41']
+    ))->search('safe query'),
+    'Rejects a changed DNS answer unless the exact new IP is explicitly authorized.'
+);
+
+$expectPolicyFailure(
+    static fn () => (new BookStackClient(
+        'https://1.1.1.1',
+        'id',
+        'secret',
+        static fn (string $url, array $headers, array $options): array => ['status' => 302, 'body' => '']
+    ))->search('safe query'),
+    'Rejects redirects instead of following them.'
+);
+
+try {
+    (new BookStackClient(
+        'https://1.1.1.1',
+        'id',
+        'secret',
+        static function (string $url, array $headers, array $options) use (&$observedOptions): never {
+            $observedOptions = $options;
+            throw new BookStackException('BookStack TLS certificate validation failed. Check trust chain and certificate SAN.');
+        }
+    ))->search('safe query');
+    $assert(false, 'Simulated TLS transport failure must fail safely.');
+} catch (BookStackException $e) {
+    $assert(
+        str_contains($e->getMessage(), 'certificate') && !str_contains($e->getMessage(), 'private host'),
+        'Simulated certificate rejection is reported without exposing transport details.'
+    );
+}
+$assert(
+    $observedOptions['verify_peer'] === true && $observedOptions['verify_host'] === 2,
+    'Certificate errors cannot be bypassed by disabling TLS verification.'
+);
+
+$allowlist = BaseUrlPolicy::parsePrivateIpAllowlist("10.20.30.40\nfd12:3456::10\n");
+$storedAllowlist = implode("\n", $allowlist);
+$assert(
+    BaseUrlPolicy::parsePrivateIpAllowlist($storedAllowlist) === $allowlist,
+    'Allowlist values round-trip through the same normalized representation used for GLPI configuration.'
+);
+$hook = file_get_contents(__DIR__ . '/../hook.php');
+$controller = file_get_contents(__DIR__ . '/../src/Controller/ConfigController.php');
+$assert(
+    is_string($hook) && str_contains($hook, "'allowed_private_ips' => ''")
+        && is_string($controller) && str_contains($controller, "'allowed_private_ips' => implode(\"\\n\", \$privateIpAllowlist)"),
+    'Allowlist has an installation default and is persisted with the plugin configuration.'
+);
+$assert(
+    is_string($controller) && substr_count($controller, "methods: ['GET', 'POST']") === 3
+        && substr_count($controller, '$this->requirePost($request);') === 3,
+    'POST form routes retain strict method checks while remaining discoverable on GLPI 11.0.4.'
+);
 
 echo "OK ({$assertions} assertions)\n";
