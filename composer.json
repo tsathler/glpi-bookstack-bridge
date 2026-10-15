@@ -1,0 +1,9 @@
+{
+  "name": "glpi-bookstack/bridge",
+  "description": "Native GLPI 11 plugin for secure BookStack API connectivity",
+  "type": "glpi-plugin",
+  "license": "GPL-3.0-or-later",
+  "require": { "php": ">=8.2", "ext-curl": "*", "ext-json": "*", "ext-sodium": "*" },
+  "autoload": { "psr-4": { "GlpiPlugin\\Bookstackbridge\\": "src/" } },
+  "config": { "sort-packages": true }
+}

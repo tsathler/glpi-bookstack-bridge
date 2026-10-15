@@ -1,0 +1,63 @@
+{% extends 'layout/page.html.twig' %}
+
+{% block content %}
+<main class="container-fluid mt-3" id="bookstackbridge">
+  <h1>{{ __('BookStack connection', 'bookstackbridge') }}</h1>
+  {% if notice %}<div class="alert alert-info" role="status">{{ notice }}</div>{% endif %}
+  {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+  <section class="card mb-4">
+    <div class="card-header"><h2 class="h4 mb-0">{{ __('Connection settings', 'bookstackbridge') }}</h2></div>
+    <div class="card-body">
+      <form method="post" action="{{ path('bookstackbridge_configure') }}">
+        <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label" for="base_url">{{ __('BookStack HTTPS URL', 'bookstackbridge') }}</label>
+          <input class="form-control" id="base_url" name="base_url" type="url" required value="{{ config.base_url|default('') }}" placeholder="https://docs.example.org">
+          <div class="form-text">{{ __('HTTPS is required. Private and local addresses are rejected.', 'bookstackbridge') }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="api_token_id">{{ __('API token ID', 'bookstackbridge') }}</label>
+          <input class="form-control" id="api_token_id" name="api_token_id" required autocomplete="off" value="{{ config.api_token_id|default('') }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="api_token">{{ __('API token secret', 'bookstackbridge') }}</label>
+          <input class="form-control" id="api_token" name="api_token" type="password" autocomplete="new-password" placeholder="{{ __('Leave blank to keep the stored secret', 'bookstackbridge') }}">
+          <div class="form-text">{{ __('Stored using GLPI protected configuration. The secret is never shown again.', 'bookstackbridge') }}</div>
+        </div>
+        <button class="btn btn-primary" type="submit">{{ __('Save settings', 'bookstackbridge') }}</button>
+      </form>
+    </div>
+  </section>
+  <section class="card mb-4">
+    <div class="card-header"><h2 class="h4 mb-0">{{ __('Test connection', 'bookstackbridge') }}</h2></div>
+    <div class="card-body">
+      <form method="post" action="{{ path('bookstackbridge_test') }}"><input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-primary" type="submit">{{ __('Check BookStack API', 'bookstackbridge') }}</button></form>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-header"><h2 class="h4 mb-0">{{ __('Experimental search', 'bookstackbridge') }}</h2></div>
+    <div class="card-body">
+      <form method="post" action="{{ path('bookstackbridge_search') }}" class="d-flex gap-2 mb-3">
+        <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
+        <label class="visually-hidden" for="query">{{ __('Search BookStack', 'bookstackbridge') }}</label>
+        <input class="form-control" id="query" name="query" maxlength="200" required value="{{ query }}" placeholder="{{ __('Search title and content', 'bookstackbridge') }}">
+        <button class="btn btn-primary" type="submit">{{ __('Search', 'bookstackbridge') }}</button>
+      </form>
+      {% if result %}
+        <p role="status">{{ result.total }} {{ __('result(s)', 'bookstackbridge') }}</p>
+        {% if result.data is empty %}<p>{{ __('No results found.', 'bookstackbridge') }}</p>{% endif %}
+        <ul class="list-group">
+          {% for item in result.data %}
+            <li class="list-group-item">
+              <strong>{{ item.name|default(item.title|default(__('Untitled', 'bookstackbridge'))) }}</strong>
+              {% if item.type|default('') %}<span class="badge text-bg-secondary ms-2">{{ item.type }}</span>{% endif %}
+              {% if item.safe_url|default('') %}<a class="ms-2" href="{{ item.safe_url }}" target="_blank" rel="noopener noreferrer">{{ __('Open in BookStack', 'bookstackbridge') }}</a>{% endif %}
+              {% if item.preview_html.content|default('') %}<p class="mb-0 mt-1">{{ item.preview_html.content|striptags|slice(0, 300) }}</p>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  </section>
+</main>
+{% endblock %}

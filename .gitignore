@@ -1,0 +1,42 @@
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+auth.json
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+.secrets/
+/secrets/
+*.token
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+config_db.php
+local_define.php
+*.local.php
+
+# Generated dependencies and test/build output
+/vendor/
+/coverage/
+/.phpunit.cache/
+/cache/
+/tmp/
+/temp/
+*.log
+*.tmp
+*.temp
+
+# Editor and operating-system artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
