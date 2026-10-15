@@ -6,6 +6,7 @@ use Config;
 use Glpi\Controller\AbstractController;
 use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
+use GlpiPlugin\Bookstackbridge\ConfigSubmission;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
 use Session;
 use Symfony\Component\HttpFoundation\Request;
@@ -21,12 +22,7 @@ final class ConfigController extends AbstractController
     public function index(): Response
     {
         $this->requireAdmin();
-        return $this->render('@bookstackbridge/config.html.twig', [
-            'config' => Config::getConfigurationValues(self::CONTEXT),
-            'result' => null,
-            'error' => null,
-            'query' => '',
-        ]);
+        return $this->renderPage(Config::getConfigurationValues(self::CONTEXT), null, null, '');
     }
 
     #[Route('/configure', name: 'bookstackbridge_configure', methods: ['GET', 'POST'])]
@@ -47,20 +43,14 @@ final class ConfigController extends AbstractController
             $current['allowed_private_ips'] = $submittedAllowlist;
             return $this->renderPage($current, null, $e->getMessage(), '');
         }
-        $tokenId = trim((string) $request->request->get('api_token_id', ''));
-        $token = trim((string) $request->request->get('api_token', ''));
-        if ($token === '') {
-            $token = (string) ($current['api_token'] ?? '');
-        }
-        if ($tokenId === '' || $token === '') {
-            return $this->renderPage($current, null, 'Token ID and secret are required.', '');
-        }
-        Config::setConfigurationValues(self::CONTEXT, [
-            'base_url' => $url,
-            'allowed_private_ips' => implode("\n", $privateIpAllowlist),
-            'api_token_id' => $tokenId,
-            'api_token' => $token,
-        ]);
+        $updated = ConfigSubmission::merge(
+            $current,
+            $url,
+            $privateIpAllowlist,
+            (string) $request->request->get('api_token_id', ''),
+            (string) $request->request->get('api_token', '')
+        );
+        Config::setConfigurationValues(self::CONTEXT, $updated);
         return $this->renderPage(Config::getConfigurationValues(self::CONTEXT), null, null, 'Configuration saved.');
     }
 
@@ -106,7 +96,22 @@ final class ConfigController extends AbstractController
 
     private function renderPage(array $config, ?array $result, ?string $error, string $notice, string $query = ''): Response
     {
-        return $this->render('@bookstackbridge/config.html.twig', compact('config', 'result', 'error', 'notice', 'query'));
+        $networkConfigured = trim((string) ($config['base_url'] ?? '')) !== '';
+        $credentialsComplete = trim((string) ($config['api_token_id'] ?? '')) !== ''
+            && trim((string) ($config['api_token'] ?? '')) !== '';
+        $integrationReady = $networkConfigured && $credentialsComplete;
+        $config['api_token_id'] = '';
+        $config['api_token'] = '';
+        return $this->render('@bookstackbridge/config.html.twig', compact(
+            'config',
+            'result',
+            'error',
+            'notice',
+            'query',
+            'networkConfigured',
+            'credentialsComplete',
+            'integrationReady'
+        ));
     }
 
     private function safeResults(array $items): array

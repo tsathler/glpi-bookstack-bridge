@@ -6,6 +6,13 @@
 <main id="bookstackbridge">
   {% if notice %}<div class="alert alert-info" role="status">{{ notice }}</div>{% endif %}
   {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+  {% if integrationReady %}
+    <div class="alert alert-success" role="status">{{ __('Integration ready for test.', 'bookstackbridge') }}</div>
+  {% elseif networkConfigured and not credentialsComplete %}
+    <div class="alert alert-warning" role="status">{{ __('Network configured; API credentials are pending.', 'bookstackbridge') }}</div>
+  {% else %}
+    <div class="alert alert-secondary" role="status">{{ __('Network configuration is pending.', 'bookstackbridge') }}</div>
+  {% endif %}
   <section class="card mb-4">
     <div class="card-header"><h2 class="h4 mb-0">{{ __('Connection settings', 'bookstackbridge') }}</h2></div>
     <div class="card-body">
@@ -22,11 +29,11 @@
           <div class="form-text">{{ __('Optional. Enter one exact private IPv4 or IPv6 address per line. CIDR ranges, hostnames, loopback, link-local, metadata, multicast, and reserved addresses are not allowed.', 'bookstackbridge') }}</div>
         </div>
         <div class="mb-3">
-          <label class="form-label" for="api_token_id">{{ __('API token ID', 'bookstackbridge') }}</label>
-          <input class="form-control" id="api_token_id" name="api_token_id" required autocomplete="off" value="{{ config.api_token_id|default('') }}">
+          <label class="form-label" for="api_token_id">{{ __('API token ID (optional)', 'bookstackbridge') }}</label>
+          <input class="form-control" id="api_token_id" name="api_token_id" autocomplete="off" placeholder="{{ __('Leave blank to keep the stored token ID', 'bookstackbridge') }}">
         </div>
         <div class="mb-3">
-          <label class="form-label" for="api_token">{{ __('API token secret', 'bookstackbridge') }}</label>
+          <label class="form-label" for="api_token">{{ __('API token secret (optional)', 'bookstackbridge') }}</label>
           <input class="form-control" id="api_token" name="api_token" type="password" autocomplete="new-password" placeholder="{{ __('Leave blank to keep the stored secret', 'bookstackbridge') }}">
           <div class="form-text">{{ __('Stored using GLPI protected configuration. The secret is never shown again.', 'bookstackbridge') }}</div>
         </div>

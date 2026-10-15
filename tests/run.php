@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/Api/BookStackException.php';
 require __DIR__ . '/../src/Security/BaseUrlPolicy.php';
+require __DIR__ . '/../src/ConfigSubmission.php';
 require __DIR__ . '/../src/Api/BookStackClient.php';
 
 use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
+use GlpiPlugin\Bookstackbridge\ConfigSubmission;
 use GlpiPlugin\Bookstackbridge\Menu;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
 
@@ -56,6 +58,22 @@ $assert(
     str_contains($template, 'name="allowed_private_ips"') && str_contains($template, 'maxlength="4096"'),
     'Configuration form exposes a bounded private-IP allowlist field.'
 );
+$assert(
+    preg_match('/name="api_token_id"[^>]*required/', $template) !== 1
+        && preg_match('/name="api_token"[^>]*required/', $template) !== 1,
+    'API token fields are optional during network configuration.'
+);
+$assert(
+    str_contains($template, 'integrationReady')
+        && str_contains($template, 'networkConfigured')
+        && str_contains($template, 'credentialsComplete'),
+    'Configuration page displays network and integration readiness states.'
+);
+$assert(
+    !str_contains($template, 'value="{{ config.api_token_id')
+        && !str_contains($template, 'value="{{ config.api_token|'),
+    'Stored credentials are never rendered into form values.'
+);
 $assert(substr_count($template, 'csrf_token()') === 3, 'All three POST forms retain CSRF tokens.');
 
 $glpiRoot = getenv('GLPI_ROOT');
@@ -80,6 +98,9 @@ if (is_string($glpiRoot) && $glpiRoot !== '') {
         'error' => null,
         'notice' => null,
         'query' => '',
+        'networkConfigured' => false,
+        'credentialsComplete' => false,
+        'integrationReady' => false,
     ]);
     $assert(str_contains($rendered, 'BookStack connection'), 'Configuration page renders through the real GLPI layout.');
     $assert(str_contains($rendered, 'BookStack HTTPS URL'), 'Rendered page includes the configuration form.');
@@ -91,6 +112,37 @@ $assert($menu['page'] === '/plugins/bookstackbridge/', 'Menu points to the plugi
 Session::$canConfigure = false;
 $assert(Menu::getMenuContent() === [], 'Menu stays hidden without configuration permission.');
 Session::$canConfigure = true;
+
+$initialConfig = ConfigSubmission::merge([], 'https://1.1.1.1', ['10.20.30.40'], '', '');
+$assert(
+    $initialConfig['base_url'] === 'https://1.1.1.1'
+        && $initialConfig['allowed_private_ips'] === '10.20.30.40'
+        && $initialConfig['api_token_id'] === ''
+        && $initialConfig['api_token'] === '',
+    'Saves network configuration with no API credentials during initial setup.'
+);
+$existingCredentials = ['api_token_id' => 'existing-id', 'api_token' => 'existing-secret'];
+$urlUpdate = ConfigSubmission::merge($existingCredentials, 'https://1.1.1.1/path', [], '', '');
+$assert(
+    $urlUpdate['api_token_id'] === 'existing-id' && $urlUpdate['api_token'] === 'existing-secret',
+    'Updating network settings with blank credential fields preserves stored credentials.'
+);
+$tokenIdUpdate = ConfigSubmission::merge($existingCredentials, 'https://1.1.1.1', [], 'replacement-id', '');
+$assert(
+    $tokenIdUpdate['api_token_id'] === 'replacement-id' && $tokenIdUpdate['api_token'] === 'existing-secret',
+    'Updating only the token ID preserves the stored secret.'
+);
+$secretUpdate = ConfigSubmission::merge($existingCredentials, 'https://1.1.1.1', [], '', 'replacement-secret');
+$assert(
+    $secretUpdate['api_token_id'] === 'existing-id' && $secretUpdate['api_token'] === 'replacement-secret',
+    'Updating only the token secret preserves the stored token ID.'
+);
+try {
+    new BookStackClient('https://1.1.1.1', '', '', static fn () => ['status' => 200, 'body' => '{}']);
+    $assert(false, 'API client must require complete credentials for API operations.');
+} catch (BookStackException $e) {
+    $assert(str_contains($e->getMessage(), 'token'), 'API operations reject missing credentials.');
+}
 
 $client = new BookStackClient('https://1.1.1.1', 'id', 'secret', static function (string $url, array $headers): array {
     if (!str_contains($url, '/api/search?query=network+setup&count=20&page=2')) {
@@ -340,10 +392,12 @@ $assert(
 );
 $hook = file_get_contents(__DIR__ . '/../hook.php');
 $controller = file_get_contents(__DIR__ . '/../src/Controller/ConfigController.php');
+$submission = file_get_contents(__DIR__ . '/../src/ConfigSubmission.php');
 $assert(
     is_string($hook) && str_contains($hook, "'allowed_private_ips' => ''")
-        && is_string($controller) && str_contains($controller, "'allowed_private_ips' => implode(\"\\n\", \$privateIpAllowlist)"),
-    'Allowlist has an installation default and is persisted with the plugin configuration.'
+        && is_string($controller) && str_contains($controller, 'ConfigSubmission::merge(')
+        && is_string($submission) && str_contains($submission, "'allowed_private_ips' => implode(\"\\n\", \$privateIpAllowlist)"),
+    'Allowlist has an installation default and validated configuration is persisted through the merge helper.'
 );
 $assert(
     is_string($controller) && substr_count($controller, "methods: ['GET', 'POST']") === 3

@@ -12,6 +12,8 @@ For GLPI versions earlier than 11.0.7, plugin routes with POST-only method decla
 
 Place the plugin under `plugins/bookstackbridge`. GLPI discovers the plugin from its folder and uses `setup.php` and `hook.php` for metadata and lifecycle. Controllers are automatically discovered in `src/Controller`. No Composer install is required at runtime.
 
+The administrator can save a validated HTTPS URL and private-IP allowlist before creating a BookStack API token. API credentials are optional configuration fields; blank fields preserve their stored values, while API test and search operations require a complete token ID and secret. The form does not render stored credentials.
+
 ## Security checks
 
 - Keep GLPI's generated `glpicrypt.key` backed up and protected; GLPI needs it to decrypt protected settings.
