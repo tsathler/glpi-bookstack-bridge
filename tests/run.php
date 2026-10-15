@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/Api/BookStackException.php';
 require __DIR__ . '/../src/Security/BaseUrlPolicy.php';
+require __DIR__ . '/../src/ConfigurationException.php';
+require __DIR__ . '/../src/ConfigRepository.php';
 require __DIR__ . '/../src/ConfigSubmission.php';
 require __DIR__ . '/../src/Api/BookStackClient.php';
 
 use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
+use GlpiPlugin\Bookstackbridge\ConfigRepository;
 use GlpiPlugin\Bookstackbridge\ConfigSubmission;
+use GlpiPlugin\Bookstackbridge\ConfigurationException;
 use GlpiPlugin\Bookstackbridge\Menu;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
 
@@ -26,6 +30,62 @@ class Session
     public static function haveRight(string $right, int $level): bool
     {
         return self::$canConfigure && $right === 'config' && $level === UPDATE;
+    }
+}
+
+/** Simulates GLPI's secured config persistence contract for standalone tests. */
+class GLPIKey
+{
+    public static bool $failDecryption = false;
+    public static bool $keyUnavailable = false;
+
+    public function encrypt(string $value): string
+    {
+        return 'glpi-encrypted:' . base64_encode($value);
+    }
+
+    public function decrypt(?string $value): ?string
+    {
+        if (self::$failDecryption) {
+            trigger_error('Synthetic cryptographic diagnostic.', E_USER_WARNING);
+            return '';
+        }
+        if (self::$keyUnavailable) {
+            return $value;
+        }
+        if (!is_string($value) || !str_starts_with($value, 'glpi-encrypted:')) {
+            return '';
+        }
+        $decrypted = base64_decode(substr($value, strlen('glpi-encrypted:')), true);
+        return is_string($decrypted) ? $decrypted : '';
+    }
+}
+
+/** Simulates GLPI Config: writes secured values encrypted and reads raw storage. */
+class Config
+{
+    /** @var array<string, array<string, string>> */
+    public static array $storage = [];
+
+    public static function getConfigurationValues(string $context, array $names = []): array
+    {
+        $values = self::$storage[$context] ?? [];
+        if ($names !== []) {
+            return array_intersect_key($values, array_fill_keys($names, true));
+        }
+        return $values;
+    }
+
+    public static function setConfigurationValues(string $context, array $values = []): void
+    {
+        $key = new GLPIKey();
+        foreach ($values as $name => $value) {
+            $value = (string) $value;
+            if ($name === 'api_token' && $value !== '') {
+                $value = $key->encrypt($value);
+            }
+            self::$storage[$context][$name] = $value;
+        }
     }
 }
 
@@ -109,6 +169,124 @@ $assert(
     'Stored credentials are never rendered into form values.'
 );
 $assert(substr_count($template, 'csrf_token()') === 3, 'All three POST forms retain CSRF tokens.');
+
+$assert(
+    str_contains($template, 'name="api_token_id"')
+        && str_contains($template, 'name="api_token"')
+        && !str_contains($template, 'value="{{ config.api_token_id')
+        && !str_contains($template, 'value="{{ config.api_token|'),
+    'Credential inputs do not render stored values.'
+);
+$controllerSource = file_get_contents(__DIR__ . '/../src/Controller/ConfigController.php');
+$assert(
+    is_string($controllerSource)
+        && str_contains($controllerSource, '$config[\'api_token_id\'] = \'\';')
+        && str_contains($controllerSource, '$config[\'api_token\'] = \'\';')
+        && str_contains($controllerSource, 'ConfigRepository::getConfigurationValuesForSubmission($submittedTokenSecret)'),
+    'Controller clears credentials before rendering and normalizes credentials before merge.'
+);
+
+Config::setConfigurationValues('plugin:bookstackbridge', [
+    'base_url' => 'https://docs.example.org',
+    'allowed_private_ips' => '',
+    'api_token_id' => 'synthetic-id',
+    'api_token' => 'synthetic-secret',
+]);
+$rawStoredSecret = Config::getConfigurationValues('plugin:bookstackbridge')['api_token'];
+$assert($rawStoredSecret !== 'synthetic-secret', 'GLPI secured config stores the token secret encrypted.');
+$normalizedConfig = ConfigRepository::getConfigurationValues();
+$assert(
+    $normalizedConfig['api_token_id'] === 'synthetic-id'
+        && $normalizedConfig['api_token'] === 'synthetic-secret',
+    'Configuration repository decrypts the stored secret once and leaves Token ID unchanged.'
+);
+
+$partialUpdate = ConfigSubmission::merge($normalizedConfig, 'https://docs.example.org', [], '', '');
+ConfigRepository::setConfigurationValues($partialUpdate);
+$assert(
+    Config::getConfigurationValues('plugin:bookstackbridge')['api_token'] === $rawStoredSecret
+        && ConfigRepository::getConfigurationValues()['api_token'] === 'synthetic-secret',
+    'Partial save preserves the existing secret without adding an encryption layer.'
+);
+
+$idOnlyUpdate = ConfigSubmission::merge(ConfigRepository::getConfigurationValues(), 'https://docs.example.org', [], 'replacement-id', '');
+ConfigRepository::setConfigurationValues($idOnlyUpdate);
+$afterIdUpdate = ConfigRepository::getConfigurationValues();
+$assert(
+    $afterIdUpdate['api_token_id'] === 'replacement-id'
+        && $afterIdUpdate['api_token'] === 'synthetic-secret',
+    'Updating only Token ID preserves the decrypted secret.'
+);
+
+$secretOnlyUpdate = ConfigSubmission::merge($afterIdUpdate, 'https://docs.example.org', [], '', 'replacement-secret');
+ConfigRepository::setConfigurationValues($secretOnlyUpdate);
+$afterSecretUpdate = ConfigRepository::getConfigurationValues();
+$assert(
+    $afterSecretUpdate['api_token_id'] === 'replacement-id'
+        && $afterSecretUpdate['api_token'] === 'replacement-secret',
+    'Updating only Token Secret preserves Token ID and stores a decryptable secret.'
+);
+
+for ($save = 0; $save < 3; $save++) {
+    $repeatedSave = ConfigSubmission::merge(ConfigRepository::getConfigurationValues(), 'https://docs.example.org', [], '', '');
+    ConfigRepository::setConfigurationValues($repeatedSave);
+}
+$assert(
+    ConfigRepository::getConfigurationValues()['api_token'] === 'replacement-secret',
+    'Repeated partial saves keep the same single encrypted storage layer.'
+);
+
+$authHeaders = [];
+$repositoryClient = new BookStackClient(
+    'https://docs.example.org',
+    (string) $afterSecretUpdate['api_token_id'],
+    (string) $afterSecretUpdate['api_token'],
+    static function (string $url, array $headers) use (&$authHeaders): array {
+        $authHeaders = $headers;
+        return ['status' => 200, 'body' => '{"data":[],"total":0}'];
+    },
+    '',
+    static fn (string $host): array => ['1.1.1.1']
+);
+$repositoryClient->testConnection();
+$assert(
+    in_array('Authorization: Token replacement-id:replacement-secret', $authHeaders, true),
+    'BookStack client receives plaintext credentials and assembles the expected Authorization header.'
+);
+
+GLPIKey::$failDecryption = true;
+try {
+    ConfigRepository::getConfigurationValues();
+    $assert(false, 'Credential decryption failure must be reported.');
+} catch (ConfigurationException $e) {
+    $assert(
+        str_contains($e->getMessage(), 'Enter the token secret again')
+            && !str_contains($e->getMessage(), 'synthetic-secret')
+            && !str_contains($e->getMessage(), $rawStoredSecret),
+        'Decryption failure returns a safe recovery message without credential or ciphertext.'
+    );
+}
+GLPIKey::$failDecryption = false;
+
+GLPIKey::$keyUnavailable = true;
+try {
+    ConfigRepository::getConfigurationValues();
+    $assert(false, 'Unavailable GLPI key must not pass ciphertext to the API client.');
+} catch (ConfigurationException $e) {
+    $replacement = ConfigRepository::getConfigurationValuesForSubmission('recovery-secret');
+    $assert(
+        $replacement['api_token'] === ''
+            && $replacement['api_token_id'] === 'replacement-id',
+        'Unreadable stored secret can be replaced without carrying ciphertext into the merge.'
+    );
+    $recovered = ConfigSubmission::merge($replacement, 'https://docs.example.org', [], '', 'recovery-secret');
+    ConfigRepository::setConfigurationValues($recovered);
+}
+GLPIKey::$keyUnavailable = false;
+$assert(
+    ConfigRepository::getConfigurationValues()['api_token'] === 'recovery-secret',
+    'Saving a replacement secret recovers configuration when the prior ciphertext is unreadable.'
+);
 
 $glpiRoot = getenv('GLPI_ROOT');
 if (is_string($glpiRoot) && $glpiRoot !== '') {

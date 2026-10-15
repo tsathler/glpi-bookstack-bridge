@@ -4,6 +4,9 @@ namespace GlpiPlugin\Bookstackbridge;
 
 final class ConfigSubmission
 {
+    // Callers must supply normalized values from ConfigRepository. In
+    // particular, api_token must be plaintext so GLPI encrypts it exactly once
+    // when Config::setConfigurationValues() persists the result.
     /**
      * @param array<string, mixed> $current
      * @param list<string> $privateIpAllowlist
