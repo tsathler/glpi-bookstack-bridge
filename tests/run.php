@@ -8,7 +8,31 @@ require __DIR__ . '/../src/Api/BookStackClient.php';
 
 use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
+use GlpiPlugin\Bookstackbridge\Menu;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
+
+define('UPDATE', 2);
+
+class CommonGLPI
+{
+}
+
+class Session
+{
+    public static bool $canConfigure = true;
+
+    public static function haveRight(string $right, int $level): bool
+    {
+        return self::$canConfigure && $right === 'config' && $level === UPDATE;
+    }
+}
+
+function __($message, $domain = null): string
+{
+    return $message;
+}
+
+require __DIR__ . '/../src/Menu.php';
 
 $assertions = 0;
 $assert = static function (bool $condition, string $message) use (&$assertions): void {
@@ -17,6 +41,13 @@ $assert = static function (bool $condition, string $message) use (&$assertions):
     }
     $assertions++;
 };
+
+$menu = Menu::getMenuContent();
+$assert($menu['title'] === 'BookStack knowledge base', 'Menu builds successfully with GLPI global classes.');
+$assert($menu['page'] === '/plugins/bookstackbridge/', 'Menu points to the plugin route.');
+Session::$canConfigure = false;
+$assert(Menu::getMenuContent() === [], 'Menu stays hidden without configuration permission.');
+Session::$canConfigure = true;
 
 $client = new BookStackClient('https://1.1.1.1', 'id', 'secret', static function (string $url, array $headers): array {
     if (!str_contains($url, '/api/search?query=network+setup&count=20&page=2')) {

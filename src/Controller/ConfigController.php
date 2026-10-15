@@ -7,6 +7,7 @@ use Glpi\Controller\AbstractController;
 use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
+use Session;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;

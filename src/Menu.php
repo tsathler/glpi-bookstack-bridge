@@ -3,6 +3,7 @@
 namespace GlpiPlugin\Bookstackbridge;
 
 use CommonGLPI;
+use Session;
 
 final class Menu extends CommonGLPI
 {
