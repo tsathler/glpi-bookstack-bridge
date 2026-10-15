@@ -54,26 +54,39 @@ $assert(
     str_contains($template, '{% block content_title %}') && str_contains($template, '{% block content_body %}'),
     'Configuration template overrides the GLPI page title and body blocks.'
 );
-$formRouteNames = [
-    'bookstackbridge_configure',
-    'bookstackbridge_test',
-    'bookstackbridge_search',
+$routeResources = [
+    '/plugins/bookstackbridge/configure',
+    '/plugins/bookstackbridge/test',
+    '/plugins/bookstackbridge/search',
 ];
-foreach ($formRouteNames as $routeName) {
+foreach ($routeResources as $resource) {
     $assert(
-        str_contains($template, "path('@bookstackbridge:{$routeName}')"),
-        "Form route {$routeName} uses GLPI's plugin route name prefix."
-    );
-    $assert(
-        !str_contains($template, "path('{$routeName}')"),
-        "Form route {$routeName} does not fall back to a literal path."
+        str_contains($template, "path('{$resource}')"),
+        "Form target {$resource} uses GLPI's prefixed resource path."
     );
 }
+$rootDoc = '/glpi';
+$getPrefixedUrl = static function (string $resource) use ($rootDoc): string {
+    $prefix = $rootDoc;
+    if (!str_starts_with($resource, '/')) {
+        $prefix .= '/';
+    }
+    return $prefix . $resource;
+};
+$renderedForms = preg_replace_callback(
+    '/\{\{\s*path\(\'([^\']+)\'\)\s*\}\}/',
+    static fn (array $matches): string => htmlspecialchars($getPrefixedUrl($matches[1]), ENT_QUOTES, 'UTF-8'),
+    $template
+);
+$assert(is_string($renderedForms), 'Form actions render through the simulated GLPI path fallback.');
+preg_match_all('/<form\b[^>]*\baction="([^"]*)"/', $renderedForms, $formMatches);
 $assert(
-    str_contains($template, "path('@bookstackbridge:bookstackbridge_configure')")
-        && str_contains($template, "path('@bookstackbridge:bookstackbridge_test')")
-        && str_contains($template, "path('@bookstackbridge:bookstackbridge_search')"),
-    'All POST forms target the routes registered under the plugin base path.'
+    $formMatches[1] === [
+        '/glpi/plugins/bookstackbridge/configure',
+        '/glpi/plugins/bookstackbridge/test',
+        '/glpi/plugins/bookstackbridge/search',
+    ],
+    'Rendered form actions include GLPI root_doc and each plugin endpoint.'
 );
 $assert(
     str_contains($template, 'name="allowed_private_ips"') && str_contains($template, 'maxlength="4096"'),
@@ -110,13 +123,9 @@ if (is_string($glpiRoot) && $glpiRoot !== '') {
     $twig = new Twig\Environment($loader, ['autoescape' => 'html']);
     $twig->addFunction(new Twig\TwigFunction('get_current_interface', static fn (): string => 'central'));
     $twig->addFunction(new Twig\TwigFunction('call', static fn (...$arguments): null => null));
-    $routePaths = [
-        '@bookstackbridge:bookstackbridge_configure' => '/plugins/bookstackbridge/configure',
-        '@bookstackbridge:bookstackbridge_test' => '/plugins/bookstackbridge/test',
-        '@bookstackbridge:bookstackbridge_search' => '/plugins/bookstackbridge/search',
-    ];
-    $twig->addFunction(new Twig\TwigFunction('path', static function (string $route) use ($routePaths): string {
-        return $routePaths[$route] ?? throw new RuntimeException("Unknown simulated plugin route: {$route}");
+    $twig->addFunction(new Twig\TwigFunction('path', static function (string $resource): string {
+        $rootDoc = '/glpi';
+        return $rootDoc . $resource;
     }));
     $twig->addFunction(new Twig\TwigFunction('csrf_token', static fn (): string => 'test-token'));
     $twig->addFunction(new Twig\TwigFunction('__', static fn (string $message, ?string $domain = null): string => $message));
@@ -134,8 +143,8 @@ if (is_string($glpiRoot) && $glpiRoot !== '') {
     $assert(str_contains($rendered, 'BookStack HTTPS URL'), 'Rendered page includes the configuration form.');
     foreach (['configure', 'test', 'search'] as $routePath) {
         $assert(
-            str_contains($rendered, "action=\"/plugins/bookstackbridge/{$routePath}\""),
-            "Rendered form uses the plugin route destination for {$routePath}."
+            str_contains($rendered, "action=\"/glpi/plugins/bookstackbridge/{$routePath}\""),
+            "Rendered form uses the root_doc-prefixed plugin destination for {$routePath}."
         );
     }
 }

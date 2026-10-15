@@ -16,7 +16,7 @@
   <section class="card mb-4">
     <div class="card-header"><h2 class="h4 mb-0">{{ __('Connection settings', 'bookstackbridge') }}</h2></div>
     <div class="card-body">
-      <form method="post" action="{{ path('@bookstackbridge:bookstackbridge_configure') }}">
+      <form method="post" action="{{ path('/plugins/bookstackbridge/configure') }}">
         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label" for="base_url">{{ __('BookStack HTTPS URL', 'bookstackbridge') }}</label>
@@ -44,13 +44,13 @@
   <section class="card mb-4">
     <div class="card-header"><h2 class="h4 mb-0">{{ __('Test connection', 'bookstackbridge') }}</h2></div>
     <div class="card-body">
-      <form method="post" action="{{ path('@bookstackbridge:bookstackbridge_test') }}"><input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-primary" type="submit">{{ __('Check BookStack API', 'bookstackbridge') }}</button></form>
+      <form method="post" action="{{ path('/plugins/bookstackbridge/test') }}"><input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-primary" type="submit">{{ __('Check BookStack API', 'bookstackbridge') }}</button></form>
     </div>
   </section>
   <section class="card">
     <div class="card-header"><h2 class="h4 mb-0">{{ __('Experimental search', 'bookstackbridge') }}</h2></div>
     <div class="card-body">
-      <form method="post" action="{{ path('@bookstackbridge:bookstackbridge_search') }}" class="d-flex gap-2 mb-3">
+      <form method="post" action="{{ path('/plugins/bookstackbridge/search') }}" class="d-flex gap-2 mb-3">
         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}">
         <label class="visually-hidden" for="query">{{ __('Search BookStack', 'bookstackbridge') }}</label>
         <input class="form-control" id="query" name="query" maxlength="200" required value="{{ query }}" placeholder="{{ __('Search title and content', 'bookstackbridge') }}">
