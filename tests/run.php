@@ -54,6 +54,27 @@ $assert(
     str_contains($template, '{% block content_title %}') && str_contains($template, '{% block content_body %}'),
     'Configuration template overrides the GLPI page title and body blocks.'
 );
+$formRouteNames = [
+    'bookstackbridge_configure',
+    'bookstackbridge_test',
+    'bookstackbridge_search',
+];
+foreach ($formRouteNames as $routeName) {
+    $assert(
+        str_contains($template, "path('@bookstackbridge:{$routeName}')"),
+        "Form route {$routeName} uses GLPI's plugin route name prefix."
+    );
+    $assert(
+        !str_contains($template, "path('{$routeName}')"),
+        "Form route {$routeName} does not fall back to a literal path."
+    );
+}
+$assert(
+    str_contains($template, "path('@bookstackbridge:bookstackbridge_configure')")
+        && str_contains($template, "path('@bookstackbridge:bookstackbridge_test')")
+        && str_contains($template, "path('@bookstackbridge:bookstackbridge_search')"),
+    'All POST forms target the routes registered under the plugin base path.'
+);
 $assert(
     str_contains($template, 'name="allowed_private_ips"') && str_contains($template, 'maxlength="4096"'),
     'Configuration form exposes a bounded private-IP allowlist field.'
@@ -89,7 +110,14 @@ if (is_string($glpiRoot) && $glpiRoot !== '') {
     $twig = new Twig\Environment($loader, ['autoescape' => 'html']);
     $twig->addFunction(new Twig\TwigFunction('get_current_interface', static fn (): string => 'central'));
     $twig->addFunction(new Twig\TwigFunction('call', static fn (...$arguments): null => null));
-    $twig->addFunction(new Twig\TwigFunction('path', static fn (string $route): string => '/' . $route));
+    $routePaths = [
+        '@bookstackbridge:bookstackbridge_configure' => '/plugins/bookstackbridge/configure',
+        '@bookstackbridge:bookstackbridge_test' => '/plugins/bookstackbridge/test',
+        '@bookstackbridge:bookstackbridge_search' => '/plugins/bookstackbridge/search',
+    ];
+    $twig->addFunction(new Twig\TwigFunction('path', static function (string $route) use ($routePaths): string {
+        return $routePaths[$route] ?? throw new RuntimeException("Unknown simulated plugin route: {$route}");
+    }));
     $twig->addFunction(new Twig\TwigFunction('csrf_token', static fn (): string => 'test-token'));
     $twig->addFunction(new Twig\TwigFunction('__', static fn (string $message, ?string $domain = null): string => $message));
     $rendered = $twig->render('@bookstackbridge/config.html.twig', [
@@ -104,6 +132,12 @@ if (is_string($glpiRoot) && $glpiRoot !== '') {
     ]);
     $assert(str_contains($rendered, 'BookStack connection'), 'Configuration page renders through the real GLPI layout.');
     $assert(str_contains($rendered, 'BookStack HTTPS URL'), 'Rendered page includes the configuration form.');
+    foreach (['configure', 'test', 'search'] as $routePath) {
+        $assert(
+            str_contains($rendered, "action=\"/plugins/bookstackbridge/{$routePath}\""),
+            "Rendered form uses the plugin route destination for {$routePath}."
+        );
+    }
 }
 
 $menu = Menu::getMenuContent();
