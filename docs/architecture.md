@@ -26,4 +26,12 @@ The GLPI menu opens the read-only knowledge routes for users with the native `kn
 
 ## Scope
 
-No BookStack database access, core modifications, migrations, JavaScript framework, or third-party runtime libraries are used. Controllers, API client, navigation service, security policy, and menu implement current M0/M1.1 behavior. Future ticket associations and selective GLPI knowledge-base sync remain out of scope.
+No BookStack database access or core modifications are used. GLPI Migration is used only to install the plugin-owned entity connection table; no JavaScript framework or third-party runtime library is added. Controllers, API client, navigation service, security policy, and menu implement current M0/M1.1 behavior. Future ticket associations and selective GLPI knowledge-base sync remain out of scope.
+
+## E1 entity connection storage (in progress)
+
+The E1 foundation introduces `glpi_plugin_bookstackbridge_connections`, with a unique row per numeric GLPI entity ID. The row stores connection URL and exact private-IP allowlist alongside separately protected Token ID and Token Secret. Both credential columns are encrypted and registered through GLPI 11's `secured_fields` hook so GLPI's `glpi:security:changekey` command can rotate them. Empty credentials are stored as `NULL`, because GLPI's rotation processes every non-NULL field and would otherwise encrypt empty strings. The existing global `plugin:bookstackbridge` configuration and its `secured_configs` declaration remain intact as a recovery source; installation does not copy them to an entity.
+
+`EntityConnectionRepository` reads and writes entity rows using GLPI's `GLPIKey` mechanism. Partial updates decrypt stored credentials once and pass plaintext only to `GLPIKey::encrypt()` before persistence; unreadable values cannot be used and can only be replaced by submitting a replacement for that credential. `copyLegacyConfigurationToEntity()` requires an exact entity-bound confirmation string and an explicit backup confirmation, copies to one entity only, refuses an existing destination, and retains the global source. It is a backend primitive for a later administrator workflow, not an automatic migration or user-facing feature in E1.
+
+This E1 storage layer is not yet wired into controllers or the M1.1 catalog. Do not treat it as multi-entity runtime authorization. Uninstall follows GLPI's plugin database convention and removes the plugin-owned table and legacy config; back up the GLPI database and `glpicrypt.key` before uninstalling. Entity repository tests use a fake GLPI database and fake GLPIKey; actual schema installation and security-key rotation still require a GLPI 11.0.4 environment.

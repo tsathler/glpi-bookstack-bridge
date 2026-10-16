@@ -18,6 +18,8 @@ Structural navigation routes are automatically discovered in `src/Controller/Kno
 
 ## Security checks
 
+The E1 storage foundation adds a plugin-owned entity connection table. Its `api_token_id` and `api_token` columns are registered with `Hooks::SECURED_FIELDS`; GLPI handles these values with its encryption mechanism and the `glpi:security:changekey` command. The legacy global config remains preserved and is not copied during install or update. A future admin flow must require an explicit target entity, a verified database/key backup, and confirmation before invoking the repository's one-entity copy primitive. Back up the database and GLPI security key before uninstall; normal plugin uninstall removes this table and the legacy plugin config context.
+
 - Keep GLPI's generated `glpicrypt.key` backed up and protected; GLPI needs it to decrypt protected settings.
 - Use a dedicated BookStack integration account, only read permissions, token expiry and rotation.
 - Keep TLS peer and SAN verification on. The HTTP client never follows redirects and ignores proxy environment settings.

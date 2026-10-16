@@ -7,6 +7,8 @@ require __DIR__ . '/../src/Security/BaseUrlPolicy.php';
 require __DIR__ . '/../src/ConfigurationException.php';
 require __DIR__ . '/../src/ConfigRepository.php';
 require __DIR__ . '/../src/ConfigSubmission.php';
+require __DIR__ . '/../src/EntityConfigurationException.php';
+require __DIR__ . '/../src/Repository/EntityConnectionRepository.php';
 require __DIR__ . '/../src/Api/BookStackClient.php';
 require __DIR__ . '/../src/Service/NavigationService.php';
 
@@ -14,10 +16,12 @@ use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
 use GlpiPlugin\Bookstackbridge\ConfigRepository;
 use GlpiPlugin\Bookstackbridge\ConfigSubmission;
+use GlpiPlugin\Bookstackbridge\EntityConfigurationException;
 use GlpiPlugin\Bookstackbridge\ConfigurationException;
 use GlpiPlugin\Bookstackbridge\Menu;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
 use GlpiPlugin\Bookstackbridge\Service\NavigationService;
+use GlpiPlugin\Bookstackbridge\Repository\EntityConnectionRepository;
 
 define('UPDATE', 2);
 define('READ', 1);
@@ -43,10 +47,13 @@ class GLPIKey
 {
     public static bool $failDecryption = false;
     public static bool $keyUnavailable = false;
+    public static string $activeKey = 'synthetic-key-1';
+    /** @var list<string> */
+    public static array $availableKeys = ['synthetic-key-1'];
 
     public function encrypt(string $value): string
     {
-        return 'glpi-encrypted:' . base64_encode($value);
+        return 'glpi-encrypted:' . self::$activeKey . ':' . base64_encode($value);
     }
 
     public function decrypt(?string $value): ?string
@@ -61,7 +68,12 @@ class GLPIKey
         if (!is_string($value) || !str_starts_with($value, 'glpi-encrypted:')) {
             return '';
         }
-        $decrypted = base64_decode(substr($value, strlen('glpi-encrypted:')), true);
+        $payload = substr($value, strlen('glpi-encrypted:'));
+        [$keyId, $encoded] = array_pad(explode(':', $payload, 2), 2, '');
+        if (!in_array($keyId, self::$availableKeys, true)) {
+            return '';
+        }
+        $decrypted = base64_decode($encoded, true);
         return is_string($decrypted) ? $decrypted : '';
     }
 }
@@ -94,6 +106,96 @@ class Config
     }
 }
 
+/** In-memory stand-in for the GLPI database API; no real DB is accessed. */
+class FakePluginDB
+{
+    /** @var list<array<string, mixed>> */
+    public array $rows = [];
+    public bool $installed = true;
+    public string $schema = '';
+
+    public function tableExists(string $table): bool
+    {
+        return $table === EntityConnectionRepository::TABLE && $this->installed;
+    }
+
+    /** @param array<string, mixed> $criteria @return list<array<string, mixed>> */
+    public function request(array $criteria): array
+    {
+        $entityId = $criteria['WHERE']['entities_id'] ?? null;
+        return array_values(array_filter(
+            $this->rows,
+            static fn (array $row): bool => $row['entities_id'] === $entityId
+        ));
+    }
+
+    /** @param array<string, mixed> $row */
+    public function insert(string $table, array $row): int
+    {
+        $row['id'] = count($this->rows) + 1;
+        $this->rows[] = $row;
+        return (int) $row['id'];
+    }
+
+    /** @param array<string, mixed> $row @param array<string, mixed> $where */
+    public function update(string $table, array $row, array $where): bool
+    {
+        foreach ($this->rows as &$stored) {
+            if ($stored['id'] === ($where['id'] ?? null)) {
+                $stored = array_merge($stored, $row);
+                unset($stored);
+                return true;
+            }
+        }
+        unset($stored);
+        return false;
+    }
+
+    public function doQuery(string $query, string $error = ''): bool
+    {
+        $this->schema = $query;
+        $this->installed = true;
+        return true;
+    }
+
+    public function error(): string
+    {
+        return '';
+    }
+}
+
+class Migration
+{
+    public static int $executionCount = 0;
+
+    public function __construct(int|string $version)
+    {
+    }
+
+    public function executeMigration(): void
+    {
+        self::$executionCount++;
+    }
+}
+
+class DBConnection
+{
+    public static function getDefaultCharset(): string
+    {
+        return 'utf8mb4';
+    }
+
+    public static function getDefaultCollation(): string
+    {
+        return 'utf8mb4_unicode_ci';
+    }
+}
+
+define('PLUGIN_BOOKSTACKBRIDGE_VERSION', '0.2.0');
+require __DIR__ . '/../hook.php';
+
+$GLOBALS['DB'] = new FakePluginDB();
+
 function __($message, $domain = null): string
 {
     return $message;
@@ -108,6 +210,159 @@ $assert = static function (bool $condition, string $message) use (&$assertions):
     }
     $assertions++;
 };
+
+$entityOne = EntityConnectionRepository::saveForEntity(11, [
+    'base_url' => 'https://books.example.test',
+    'api_token_id' => 'entity-one-id',
+    'api_token' => 'entity-one-secret',
+]);
+$entityTwo = EntityConnectionRepository::saveForEntity(22, [
+    'base_url' => 'https://books.example.test',
+    'api_token_id' => 'entity-two-id',
+    'api_token' => 'entity-two-secret',
+]);
+$assert($entityOne['api_token'] === 'entity-one-secret' && $entityTwo['api_token'] === 'entity-two-secret', 'Entity connections decrypt through GLPIKey when read after storage.');
+$assert($entityOne['entities_id'] === 11 && $entityTwo['entities_id'] === 22, 'Entity connection records remain isolated by numeric entity ID.');
+$assert($entityOne['state'] === 'ready', 'A network URL and complete credentials produce the ready state.');
+$rows = $GLOBALS['DB']->rows;
+$assert(
+    !str_contains($rows[0]['api_token_id'], 'entity-one-id')
+        && !str_contains($rows[0]['api_token'], 'entity-one-secret'),
+    'Both credential fields are encrypted before insertion into the entity table.'
+);
+
+// Simulate GLPI's security-key migration only for SECURED_FIELDS columns. This
+// validates the declaration and repository contract, not GLPI's real CLI.
+$rotationColumns = ['api_token_id', 'api_token'];
+GLPIKey::$activeKey = 'synthetic-key-2';
+GLPIKey::$availableKeys = ['synthetic-key-1', 'synthetic-key-2'];
+foreach ($GLOBALS['DB']->rows as &$rowForRotation) {
+    foreach ($rotationColumns as $column) {
+        if ($rowForRotation[$column] !== null) {
+            $plain = (new GLPIKey())->decrypt($rowForRotation[$column]);
+            $rowForRotation[$column] = (new GLPIKey())->encrypt((string) $plain);
+        }
+    }
+}
+unset($rowForRotation);
+GLPIKey::$availableKeys = ['synthetic-key-2'];
+$afterRotation = EntityConnectionRepository::getForEntity(11);
+$assert(
+    $afterRotation['api_token_id'] === 'entity-one-id'
+        && $afterRotation['api_token'] === 'entity-one-secret',
+    'A simulated GLPI rotation of both secured columns leaves entity credentials readable with the new key.'
+);
+$pendingConnection = EntityConnectionRepository::saveForEntity(55, ['base_url' => 'https://pending.example.test']);
+$pendingStoredRow = $GLOBALS['DB']->request([
+    'FROM' => EntityConnectionRepository::TABLE,
+    'WHERE' => ['entities_id' => 55],
+])[0];
+$assert(
+    $pendingConnection['state'] === 'credentials_pending'
+        && $pendingStoredRow['api_token_id'] === null
+        && $pendingStoredRow['api_token'] === null,
+    'Missing credentials remain NULL so GLPI key rotation cannot turn empty values into unreadable ciphertext.'
+);
+
+EntityConnectionRepository::saveForEntity(11, ['api_token_id' => '', 'api_token' => '']);
+EntityConnectionRepository::saveForEntity(11, ['allowed_private_ips' => '192.0.2.10']);
+$afterPartialSaves = EntityConnectionRepository::getForEntity(11);
+$assert(
+    $afterPartialSaves['api_token_id'] === 'entity-one-id'
+        && $afterPartialSaves['api_token'] === 'entity-one-secret'
+        && $afterPartialSaves['allowed_private_ips'] === '192.0.2.10',
+    'Repeated partial saves preserve decrypted credentials without encrypting ciphertext again.'
+);
+$idOnlyUpdate = EntityConnectionRepository::saveForEntity(11, ['api_token_id' => 'entity-one-id-rotated']);
+$assert(
+    $idOnlyUpdate['api_token_id'] === 'entity-one-id-rotated'
+        && $idOnlyUpdate['api_token'] === 'entity-one-secret',
+    'Token ID can be replaced independently while preserving the existing secret.'
+);
+$secretOnlyUpdate = EntityConnectionRepository::saveForEntity(11, ['api_token' => 'entity-one-secret-rotated']);
+$assert(
+    $secretOnlyUpdate['api_token_id'] === 'entity-one-id-rotated'
+        && $secretOnlyUpdate['api_token'] === 'entity-one-secret-rotated',
+    'Token Secret can be replaced independently while preserving the existing ID.'
+);
+
+// An unreadable credential is never returned for use, but that exact field can
+// be replaced without requiring the other credential to be changed.
+$entityRows = &$GLOBALS['DB']->rows;
+$entityRows[0]['api_token'] = 'invalid-ciphertext';
+try {
+    EntityConnectionRepository::getForEntity(11);
+    $assert(false, 'Unreadable stored credentials must not be used.');
+} catch (EntityConfigurationException $e) {
+    $assert(!str_contains($e->getMessage(), 'invalid-ciphertext'), 'Credential decryption errors are safe and do not expose ciphertext.');
+}
+$recovered = EntityConnectionRepository::saveForEntity(11, ['api_token' => 'replacement-secret']);
+$assert($recovered['api_token'] === 'replacement-secret', 'An unreadable secret can be replaced administratively.');
+unset($entityRows);
+
+$setupSource = file_get_contents(__DIR__ . '/../setup.php');
+$assert(
+    is_string($setupSource)
+        && str_contains($setupSource, "Hooks::SECURED_FIELDS]['bookstackbridge']")
+        && str_contains($setupSource, 'glpi_plugin_bookstackbridge_connections.api_token_id')
+        && str_contains($setupSource, 'glpi_plugin_bookstackbridge_connections.api_token'),
+    'Both entity credential columns are declared for GLPI security-key rotation.'
+);
+
+Config::setConfigurationValues('plugin:bookstackbridge', [
+    'base_url' => 'https://legacy.example.test',
+    'api_token_id' => 'legacy-id',
+    'api_token' => 'legacy-secret',
+]);
+$legacyCiphertextBefore = Config::getConfigurationValues('plugin:bookstackbridge')['api_token'];
+foreach ([['MIGRATE TO ENTITY 33', false], ['', true]] as [$phrase, $backupConfirmed]) {
+    try {
+        EntityConnectionRepository::copyLegacyConfigurationToEntity(33, $phrase, $backupConfirmed);
+        $assert(false, 'Legacy copy must require both exact target confirmation and backup confirmation.');
+    } catch (EntityConfigurationException) {
+        $assert(EntityConnectionRepository::getForEntity(33)['state'] === 'network_pending', 'Rejected legacy copy does not create an entity connection.');
+    }
+}
+$migrated = EntityConnectionRepository::copyLegacyConfigurationToEntity(33, 'MIGRATE TO ENTITY 33', true);
+$assert($migrated['api_token_id'] === 'legacy-id' && $migrated['api_token'] === 'legacy-secret', 'Confirmed migration copies legacy credentials to exactly the selected entity.');
+try {
+    EntityConnectionRepository::copyLegacyConfigurationToEntity(11, 'MIGRATE TO ENTITY 11', true);
+    $assert(false, 'Legacy migration must not overwrite an existing entity connection.');
+} catch (EntityConfigurationException) {
+    $assert(
+        EntityConnectionRepository::getForEntity(11)['api_token'] === 'replacement-secret',
+        'Migration refuses an occupied entity and leaves its existing connection unchanged.'
+    );
+}
+$assert(
+    Config::getConfigurationValues('plugin:bookstackbridge')['api_token'] === $legacyCiphertextBefore
+        && ConfigRepository::getConfigurationValues()['api_token'] === 'legacy-secret',
+    'Legacy global configuration remains intact and decryptable as a recovery source.'
+);
+$assert(
+    EntityConnectionRepository::getForEntity(44)['state'] === 'network_pending',
+    'Entities without a copied or configured connection remain empty.'
+);
+$GLOBALS['DB']->installed = true;
+$assert(plugin_bookstackbridge_install(), 'Plugin install/update hook completes in the simulated environment.');
+$assert(Migration::$executionCount === 1, 'The GLPI migration runner executes on the existing-table update path.');
+$assert(
+    ConfigRepository::getConfigurationValues()['api_token'] === 'legacy-secret',
+    'Plugin install/update preserves existing legacy global credentials.'
+);
+$GLOBALS['DB']->installed = false;
+$assert(plugin_bookstackbridge_install(), 'A clean install creates the entity connection table.');
+$assert(Migration::$executionCount === 2, 'The GLPI migration runner also executes during clean installation.');
+$assert(
+    str_contains($GLOBALS['DB']->schema, 'UNIQUE KEY `unicity_entities_id`')
+        && str_contains($GLOBALS['DB']->schema, '`api_token_id` text DEFAULT NULL')
+        && str_contains($GLOBALS['DB']->schema, '`api_token` text DEFAULT NULL'),
+    'Entity schema enforces one protected credential row per entity.'
+);
+$assert(
+    ConfigRepository::getConfigurationValues()['api_token'] === 'legacy-secret',
+    'Clean-install hook also preserves existing global credentials without auto-migrating them.'
+);
 
 $template = file_get_contents(__DIR__ . '/../templates/config.html.twig');
 $assert(is_string($template), 'Configuration Twig template is readable.');

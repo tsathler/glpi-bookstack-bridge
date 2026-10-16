@@ -2,7 +2,7 @@
 
 use Glpi\Plugin\Hooks;
 
-define('PLUGIN_BOOKSTACKBRIDGE_VERSION', '0.1.0');
+define('PLUGIN_BOOKSTACKBRIDGE_VERSION', '0.2.0');
 define('PLUGIN_BOOKSTACKBRIDGE_MIN_GLPI', '11.0.0');
 define('PLUGIN_BOOKSTACKBRIDGE_MAX_GLPI', '11.1.0');
 
@@ -12,6 +12,10 @@ function plugin_init_bookstackbridge(): void
 
     $PLUGIN_HOOKS['csrf_compliant']['bookstackbridge'] = true;
     $PLUGIN_HOOKS[Hooks::SECURED_CONFIGS]['bookstackbridge'] = ['api_token'];
+    $PLUGIN_HOOKS[Hooks::SECURED_FIELDS]['bookstackbridge'] = [
+        'glpi_plugin_bookstackbridge_connections.api_token_id',
+        'glpi_plugin_bookstackbridge_connections.api_token',
+    ];
     $PLUGIN_HOOKS['menu_toadd']['bookstackbridge']['tools'] = [
         GlpiPlugin\Bookstackbridge\Menu::class,
     ];
