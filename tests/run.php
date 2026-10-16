@@ -8,6 +8,7 @@ require __DIR__ . '/../src/ConfigurationException.php';
 require __DIR__ . '/../src/ConfigRepository.php';
 require __DIR__ . '/../src/ConfigSubmission.php';
 require __DIR__ . '/../src/Api/BookStackClient.php';
+require __DIR__ . '/../src/Service/NavigationService.php';
 
 use GlpiPlugin\Bookstackbridge\Api\BookStackClient;
 use GlpiPlugin\Bookstackbridge\Api\BookStackException;
@@ -16,8 +17,10 @@ use GlpiPlugin\Bookstackbridge\ConfigSubmission;
 use GlpiPlugin\Bookstackbridge\ConfigurationException;
 use GlpiPlugin\Bookstackbridge\Menu;
 use GlpiPlugin\Bookstackbridge\Security\BaseUrlPolicy;
+use GlpiPlugin\Bookstackbridge\Service\NavigationService;
 
 define('UPDATE', 2);
+define('READ', 1);
 
 class CommonGLPI
 {
@@ -26,10 +29,12 @@ class CommonGLPI
 class Session
 {
     public static bool $canConfigure = true;
+    public static bool $canReadKnowledge = true;
 
     public static function haveRight(string $right, int $level): bool
     {
-        return self::$canConfigure && $right === 'config' && $level === UPDATE;
+        return ($right === 'config' && $level === UPDATE && self::$canConfigure)
+            || ($right === 'knowbase' && $level === READ && self::$canReadKnowledge);
     }
 }
 
@@ -170,6 +175,28 @@ $assert(
 );
 $assert(substr_count($template, 'csrf_token()') === 3, 'All three POST forms retain CSRF tokens.');
 
+$knowledgeTemplate = file_get_contents(__DIR__ . '/../templates/knowledge.html.twig');
+$assert(is_string($knowledgeTemplate), 'Knowledge Twig template is readable.');
+$assert(str_contains($knowledgeTemplate, 'layout/page_without_tabs.html.twig'), 'Knowledge page uses the GLPI 11 page layout.');
+$assert(str_contains($knowledgeTemplate, 'breadcrumbs') && str_contains($knowledgeTemplate, 'No items are available here.'), 'Knowledge UI includes breadcrumbs and an empty state.');
+$assert(!str_contains(strtolower($knowledgeTemplate), '<iframe') && !str_contains($knowledgeTemplate, 'page.html'), 'Knowledge UI does not embed BookStack or render page HTML.');
+$knowledgeControllerSource = file_get_contents(__DIR__ . '/../src/Controller/KnowledgeController.php');
+$assert(
+    str_contains($knowledgeTemplate, "path('/plugins/bookstackbridge/knowledge')")
+        && str_contains($knowledgeTemplate, 'path(crumb.href)')
+        && str_contains($knowledgeTemplate, 'path(item.href)')
+        && !str_contains($knowledgeTemplate, 'path(\'bookstackbridge_'),
+    'Knowledge links use GLPI prefixed resource paths instead of unresolved plugin route names.'
+);
+$assert(
+    str_contains((string) $knowledgeControllerSource, "'/plugins/bookstackbridge/knowledge/books/'")
+        && str_contains((string) $knowledgeControllerSource, "'/chapters/'")
+        && str_contains((string) $knowledgeControllerSource, "'/pages/'"),
+    'Generated links preserve book, chapter, and page context in plugin route resources.'
+);
+$assert(is_string($knowledgeControllerSource) && substr_count($knowledgeControllerSource, "Session::haveRight('knowbase', READ)") === 1, 'All knowledge routes share the native GLPI knowledge-base read permission.');
+$assert(str_contains((string) $knowledgeControllerSource, "methods: ['GET']"), 'Structural navigation routes are read-only GET routes.');
+
 $assert(
     str_contains($template, 'name="api_token_id"')
         && str_contains($template, 'name="api_token"')
@@ -177,6 +204,76 @@ $assert(
         && !str_contains($template, 'value="{{ config.api_token|'),
     'Credential inputs do not render stored values.'
 );
+
+$navigationRequests = [];
+$navigationClient = new BookStackClient(
+    'https://docs.example.org',
+    'synthetic-id',
+    'synthetic-secret',
+    static function (string $url, array $headers) use (&$navigationRequests): array {
+        $navigationRequests[] = $url;
+        if (str_contains($url, '/api/shelves?')) {
+            return ['status' => 200, 'body' => json_encode(['data' => [['id' => 7, 'name' => 'Operations', 'description' => 'Team guidance', 'url' => 'https://internal.example.test/shelves/7']], 'total' => 101])];
+        }
+        if (str_ends_with($url, '/api/shelves/7')) {
+            return ['status' => 200, 'body' => json_encode(['id' => 7, 'name' => 'Operations', 'books' => [['id' => 21, 'name' => 'Handbook']]])];
+        }
+        if (str_ends_with($url, '/api/books/21')) {
+            return ['status' => 200, 'body' => json_encode([
+                'id' => 21, 'name' => 'Handbook',
+                'shelves' => [['id' => 7, 'name' => 'Operations'], ['id' => 8, 'name' => 'Reference']],
+                'contents' => [
+                    ['id' => 31, 'name' => 'Getting started', 'type' => 'chapter', 'pages' => [['id' => 41, 'name' => 'First steps', 'html' => '<script>not rendered</script>']]],
+                    ['id' => 42, 'name' => 'Book overview', 'type' => 'page', 'html' => '<script>not rendered</script>'],
+                ],
+            ])];
+        }
+        return ['status' => 404, 'body' => '{}'];
+    },
+    '',
+    static fn (string $host): array => ['1.1.1.1']
+);
+$navigation = new NavigationService($navigationClient);
+$shelfPage = $navigation->shelves(2);
+$assert($shelfPage['total'] === 101 && $shelfPage['page'] === 2 && $shelfPage['pages'] === 2, 'Shelf navigation exposes bounded page metadata.');
+$assert(str_contains($navigationRequests[0], 'count=100&offset=100'), 'Shelf pagination uses the BookStack count and offset parameters.');
+$assert(!isset($shelfPage['items'][0]['url']), 'Navigation normalization discards API URLs that may expose internal hosts.');
+$shelfDetail = $navigation->shelf(7);
+$assert($shelfDetail['books'][0]['id'] === 21, 'Shelf detail exposes its books from the official shelf relation.');
+$bookStructure = $navigation->book(21);
+$assert(count($bookStructure['shelves']) === 2, 'Book structure retains all shelf memberships for multi-shelf books.');
+$assert($bookStructure['contents'][0]['type'] === 'chapter' && $bookStructure['contents'][0]['pages'][0]['name'] === 'First steps', 'Book structure includes chapters and their page titles.');
+$assert($bookStructure['contents'][1]['type'] === 'page', 'Book structure supports pages directly under a book.');
+$assert(!isset($bookStructure['contents'][0]['pages'][0]['html']), 'Navigation strips page HTML and other unapproved BookStack fields.');
+$chapterDetail = $navigation->chapter(21, 31);
+$pageDetail = $navigation->page(21, 41);
+$directPageDetail = $navigation->page(21, 42);
+$assert($chapterDetail['pages'][0]['id'] === 41 && $pageDetail['chapter']['id'] === 31, 'Chapter and nested page relationships resolve within the selected book.');
+$assert($directPageDetail['chapter'] === null, 'Pages directly under a book resolve without a chapter.');
+$navigationRequestCount = count($navigationRequests);
+try {
+    $navigation->book(0);
+    $assert(false, 'Invalid BookStack IDs must be rejected.');
+} catch (BookStackException) {
+    $assert(count($navigationRequests) === $navigationRequestCount, 'Invalid IDs fail before making an API request.');
+}
+try {
+    $navigation->chapter(21, 999);
+    $assert(false, 'A chapter absent from the selected book must fail safely.');
+} catch (BookStackException $e) {
+    $assert($e->statusCode === 404 && !str_contains($e->getMessage(), '999'), 'Missing hierarchy items produce a safe unavailable response.');
+}
+$malformedNavigation = new NavigationService(new BookStackClient(
+    'https://docs.example.org', 'id', 'secret',
+    static fn (): array => ['status' => 200, 'body' => '{"id":21,"name":"Handbook","contents":"unexpected"}'],
+    '', static fn (string $host): array => ['1.1.1.1']
+));
+try {
+    $malformedNavigation->book(21);
+    $assert(false, 'Unexpected BookStack hierarchy shapes must fail.');
+} catch (BookStackException $e) {
+    $assert(str_contains($e->getMessage(), 'structure'), 'Unexpected hierarchy responses return a safe error.');
+}
 $controllerSource = file_get_contents(__DIR__ . '/../src/Controller/ConfigController.php');
 $assert(
     is_string($controllerSource)
@@ -325,14 +422,32 @@ if (is_string($glpiRoot) && $glpiRoot !== '') {
             "Rendered form uses the root_doc-prefixed plugin destination for {$routePath}."
         );
     }
+    $renderedKnowledge = $twig->render('@bookstackbridge/knowledge.html.twig', [
+        'view' => 'book', 'title' => 'Handbook', 'book' => ['id' => 21, 'name' => 'Handbook'],
+        'items' => [['id' => 31, 'name' => 'Getting started', 'type' => 'chapter', 'href' => '/plugins/bookstackbridge/knowledge/books/21/chapters/31']],
+        'shelves' => [['id' => 7, 'name' => 'Operations', 'href' => '/plugins/bookstackbridge/knowledge/shelves/7']],
+        'breadcrumbs' => [['label' => 'Shelves', 'href' => '/plugins/bookstackbridge/knowledge']],
+        'error' => null, 'notice' => null, 'canConfigure' => true,
+    ]);
+    $assert(str_contains($renderedKnowledge, 'href="/glpi/plugins/bookstackbridge/knowledge/books/21/chapters/31"'), 'Knowledge navigation renders root_doc-prefixed links through GLPI Twig when GLPI_ROOT is available.');
+    $assert(str_contains($renderedKnowledge, 'href="/glpi/plugins/bookstackbridge/"'), 'The knowledge template renders a root_doc-prefixed settings link for administrators.');
+    $assert(str_contains($renderedKnowledge, 'Handbook') && !str_contains($renderedKnowledge, '<iframe'), 'Rendered knowledge template contains structure without embedding BookStack.');
 }
 
 $menu = Menu::getMenuContent();
 $assert($menu['title'] === 'BookStack knowledge base', 'Menu builds successfully with GLPI global classes.');
-$assert($menu['page'] === '/plugins/bookstackbridge/', 'Menu points to the plugin route.');
+$assert($menu['page'] === '/plugins/bookstackbridge/knowledge', 'Menu points to structural knowledge navigation.');
+$assert(Session::haveRight('knowbase', READ), 'Structural navigation requires GLPI knowledge-base read access, not config update.');
 Session::$canConfigure = false;
-$assert(Menu::getMenuContent() === [], 'Menu stays hidden without configuration permission.');
+Session::$canReadKnowledge = false;
+$assert(Menu::getMenuContent() === [], 'Menu stays hidden without GLPI knowledge-base read permission.');
+Session::$canReadKnowledge = true;
+$assert(Menu::getMenuContent()['page'] === '/plugins/bookstackbridge/knowledge', 'Knowledge navigation remains available to readers without configuration update permission.');
 Session::$canConfigure = true;
+$assert(Menu::getMenuContent()['page'] === '/plugins/bookstackbridge/knowledge', 'Users with both rights enter the read-only knowledge interface.');
+Session::$canReadKnowledge = false;
+$assert(Menu::getMenuContent()['page'] === '/plugins/bookstackbridge/', 'Configuration administrators without knowledge read access retain a settings entry point.');
+Session::$canReadKnowledge = true;
 
 $initialConfig = ConfigSubmission::merge([], 'https://1.1.1.1', ['10.20.30.40'], '', '');
 $assert(

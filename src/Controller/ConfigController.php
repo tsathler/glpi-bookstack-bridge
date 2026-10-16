@@ -121,6 +121,7 @@ final class ConfigController extends AbstractController
         $credentialsComplete = trim((string) ($config['api_token_id'] ?? '')) !== ''
             && trim((string) ($config['api_token'] ?? '')) !== '';
         $integrationReady = $networkConfigured && $credentialsComplete;
+        $canBrowseKnowledge = Session::haveRight('knowbase', READ);
         $config['api_token_id'] = '';
         $config['api_token'] = '';
         return $this->render('@bookstackbridge/config.html.twig', compact(
@@ -131,7 +132,8 @@ final class ConfigController extends AbstractController
             'query',
             'networkConfigured',
             'credentialsComplete',
-            'integrationReady'
+            'integrationReady',
+            'canBrowseKnowledge'
         ));
     }
 

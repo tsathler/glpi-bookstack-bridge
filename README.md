@@ -1,6 +1,6 @@
 # GLPI BookStack Bridge
 
-GLPI 11 plugin foundation for an authenticated, read-only connection to the BookStack REST API. M0 includes protected connection settings, an API connectivity check, and an experimental search screen. All three actions are restricted to users with GLPI configuration update rights.
+GLPI 11 plugin for an authenticated, read-only connection to the BookStack REST API. M0 includes protected connection settings, an API connectivity check, and experimental search. M1.1 adds read-only structural navigation of shelves, books, chapters, and page titles. Settings, API check, and experimental search require GLPI configuration update rights; structural navigation requires the native GLPI Knowledge base read right.
 
 ## Requirements
 
@@ -23,10 +23,14 @@ Open **Tools → BookStack knowledge base** as a user with configuration update 
 
 The secret is stored in GLPI's `plugin:bookstackbridge` configuration context and declared through GLPI's `secured_configs` hook, so GLPI encrypts it with its security key and can migrate it when that key changes. The plugin does not display the secret back in the form. Private IP destinations can be authorized individually in **Allowed private destination IPs**. Enter one exact RFC1918 IPv4 or unique-local IPv6 address per line; CIDR ranges and hostnames are not accepted. DNS names resolving to private addresses require each private address returned by DNS to be listed. Loopback, link-local, metadata, multicast, and reserved destinations remain blocked. HTTPS certificate verification remains enabled and redirects are never followed. The plugin connects directly and ignores proxy environment settings so the validated IP can be pinned. See [Network configuration](docs/network-configuration.md) before enabling an internal destination.
 
+## Browse BookStack structure
+
+Use **Tools → BookStack knowledge base** to browse shelves, then books, chapters, and page titles. A book may be listed under more than one shelf; the book view shows its shelf memberships. Pages directly under a book are listed alongside chapters. Shelf lists are paginated. Navigation fetches structural metadata through the BookStack API on each request; it does not store or synchronize content in GLPI. M1.1 does not display page body HTML, images, or attachments. The reader is reserved for M1.2. The BookStack API uses the configured read-only integration account, so its BookStack content permissions apply to every GLPI reader. Grant the GLPI Knowledge base read right only to profiles whose users are authorized for the integration account's full content scope. Experimental search and settings remain on the administrator connection page.
+
 ## Development checks
 
 Run `php tests/run.php` for simulated HTTP response handling and URL policy checks. These tests do not connect to GLPI or a BookStack server. Run `php -l` on the PHP files when making changes. See [docs/development.md](docs/development.md), [docs/architecture.md](docs/architecture.md), and [network configuration](docs/network-configuration.md).
 
 ## Status and limits
 
-M0 is implemented. Search is intentionally restricted to configuration administrators in this milestone; do not treat this as a general user knowledge portal. Search results and excerpts are HTML escaped by Twig. BookStack result links are external links. M1 navigation, article display, sanitization of full page HTML, and ticket linking are not implemented. Integration against a live GLPI/BookStack installation has not been validated in this repository.
+M0 was validated in GLPI 11.0.4. M1.1 is implemented locally, but its new navigation has not yet been validated against the test installation. Search remains restricted to configuration administrators; navigation follows GLPI Knowledge base read permissions. Search results and excerpts are HTML escaped by Twig. The page body reader, rich HTML sanitization, and ticket linking are not implemented. The automated API and navigation tests use simulated responses and do not prove live BookStack connectivity.

@@ -19,12 +19,14 @@ final class Menu extends CommonGLPI
 
     public static function getMenuContent(): array
     {
-        if (!Session::haveRight('config', UPDATE)) {
+        $canReadKnowledge = Session::haveRight('knowbase', READ);
+        $canConfigure = Session::haveRight('config', UPDATE);
+        if (!$canReadKnowledge && !$canConfigure) {
             return [];
         }
         return [
             'title' => self::getMenuName(),
-            'page' => '/plugins/bookstackbridge/',
+            'page' => $canReadKnowledge ? '/plugins/bookstackbridge/knowledge' : '/plugins/bookstackbridge/',
             'icon' => 'ti ti-books',
         ];
     }

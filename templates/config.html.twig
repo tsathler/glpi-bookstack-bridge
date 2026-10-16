@@ -1,6 +1,11 @@
 {% extends 'layout/page_without_tabs.html.twig' %}
 
-{% block content_title %}{{ __('BookStack connection', 'bookstackbridge') }}{% endblock %}
+{% block content_title %}
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h1 class="mb-0">{{ __('BookStack connection', 'bookstackbridge') }}</h1>
+    {% if canBrowseKnowledge|default(false) %}<a class="btn btn-outline-secondary" href="{{ path('/plugins/bookstackbridge/knowledge') }}">{{ __('Browse knowledge', 'bookstackbridge') }}</a>{% endif %}
+  </div>
+{% endblock %}
 
 {% block content_body %}
 <main id="bookstackbridge">

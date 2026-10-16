@@ -2,7 +2,7 @@
 
 ## Local checks
 
-Run `php tests/run.php` to exercise the API client's response parsing, authentication error mapping, private-address policy, DNS multi-answer and pinning behavior, redirect refusal, TLS option preservation, and allowlist normalization using simulated resolvers/transports. The test does not issue network requests or perform a real TLS handshake. If a local GLPI source/install tree is available, set `GLPI_ROOT` to its root before running to exercise the optional Twig layout regression against that tree.
+Run `php tests/run.php` to exercise the API client's response parsing, authentication error mapping, private-address policy, DNS multi-answer and pinning behavior, redirect refusal, TLS option preservation, allowlist normalization, and structural navigation using simulated resolvers/transports and API responses. The test does not issue network requests or perform a real TLS handshake. If a local GLPI source/install tree is available, set `GLPI_ROOT` to its root before running to exercise the optional Twig layout and rendered navigation links against that tree.
 
 Run `php -l` on each PHP file to check syntax. A real compatibility check requires installing the plugin in a GLPI 11 instance; a real connectivity check requires a BookStack instance and an administrator-provided read-only API token.
 
@@ -13,6 +13,8 @@ For GLPI versions earlier than 11.0.7, plugin routes with POST-only method decla
 Place the plugin under `plugins/bookstackbridge`. GLPI discovers the plugin from its folder and uses `setup.php` and `hook.php` for metadata and lifecycle. Controllers are automatically discovered in `src/Controller`. No Composer install is required at runtime.
 
 The administrator can save a validated HTTPS URL and private-IP allowlist before creating a BookStack API token. API credentials are optional configuration fields; blank fields preserve their stored values, while API test and search operations require a complete token ID and secret. The form does not render stored credentials.
+
+Structural navigation routes are automatically discovered in `src/Controller/KnowledgeController.php`. They are GET-only and require GLPI's native `knowbase` `READ` right; configuration, API test, and search routes continue to require `config` `UPDATE`. Shelf lists use `count=100` and `offset`; the BookStack shelf and book detail responses provide embedded relationship data. The navigation service only passes structural IDs, names, and descriptions to Twig. The integration account's BookStack permissions define the shared content scope for all GLPI readers. Do not add page bodies or API-provided URLs to navigation output; page reading is a separate M1.2 scope.
 
 ## Security checks
 
