@@ -1,5 +1,9 @@
 # GLPI BookStack Bridge
 
+**Languages:** [English](#english) · [Português](#português)
+
+## English
+
 **Read-only BookStack knowledge-base integration for GLPI 11, with explicit access controls and guarded API connectivity.**
 
 > **Status:** M0 and M1.1 functionally validated on GLPI 11.0.4 with a real BookStack instance. Page-body reading, ticket linking, and multi-entity integration are **not complete**.
@@ -69,6 +73,8 @@ The E1 multi-entity persistence foundation is in progress and is not connected t
 ---
 
 ## Português
+
+[↑ English](#english)
 
 **Plugin para GLPI 11 que integra a navegação na base de conhecimento do BookStack por API REST com acesso somente leitura.**
 
