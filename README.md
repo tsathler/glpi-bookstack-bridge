@@ -65,3 +65,41 @@ Run `php tests/run.php` for simulated HTTP response handling and URL policy chec
 M0 and M1.1 were functionally validated in GLPI 11.0.4 with a real BookStack instance. Search remains restricted to configuration administrators; navigation follows GLPI Knowledge base read permissions. Search results and excerpts are HTML escaped by Twig. The page body reader, rich HTML sanitization, and ticket linking are not implemented. The automated API and navigation tests use simulated responses and do not prove live BookStack connectivity.
 
 The E1 multi-entity persistence foundation is in progress and is not connected to the existing configuration screens or catalog. It preserves legacy global configuration and requires an explicit, confirmed one-entity copy operation; installation never assigns existing credentials to entities automatically. See [architecture](docs/architecture.md) and [development](docs/development.md) for the storage and key-rotation design. Before uninstalling, back up the GLPI database and `glpicrypt.key`; normal plugin uninstall removes plugin-owned entity connections and legacy plugin configuration.
+
+---
+
+## Português
+
+**Plugin para GLPI 11 que integra a navegação na base de conhecimento do BookStack por API REST com acesso somente leitura.**
+
+### Estado do projeto
+
+| Funcionalidade | Estado |
+| --- | --- |
+| Configuração protegida e teste da API | Implementados e validados |
+| Pesquisa experimental | Implementada; restrita a administradores de configuração |
+| Navegação por estantes, livros, capítulos e títulos | Implementada; respeita a permissão de leitura da base de conhecimento no GLPI |
+| Leitura do conteúdo de páginas e vínculos com chamados | Não implementados |
+| Persistência por entidade | Base em desenvolvimento; ainda não integrada à interface |
+
+M0 e M1.1 foram validados funcionalmente no GLPI 11.0.4 com uma instância real do BookStack. Os testes automatizados usam respostas simuladas e não substituem a validação de conectividade real.
+
+### Segurança e requisitos
+
+- GLPI 11.0.x, PHP 8.2+, extensões cURL e Sodium.
+- Conta dedicada do BookStack com acesso à API e permissões mínimas de leitura.
+- HTTPS com verificação de certificados. Endereços IP privados exigem liberação explícita de cada IP.
+- Credenciais protegidas pelo mecanismo de configuração segura do GLPI.
+- O escopo visível aos leitores do GLPI corresponde às permissões da conta de integração do BookStack.
+
+### Instalação e validação
+
+Copie os arquivos para `<GLPI_ROOT>/plugins/bookstackbridge`, instale e ative em **Configurar → Plugins** (ou equivalente no idioma da interface). Em **Ferramentas → Base de conhecimento BookStack**, configure a conexão com privilégios apropriados e execute a verificação da API.
+
+```sh
+php tests/run.php
+```
+
+Esse comando executa testes simulados. Para maiores detalhes, consulte [Arquitetura](docs/architecture.md), [Desenvolvimento](docs/development.md) e [Configuração de rede](docs/network-configuration.md).
+
+**Limitações:** o leitor de conteúdo, a sanitização de HTML rico e a vinculação a chamados não estão prontos. Antes de desinstalar, faça backup do banco GLPI e da chave `glpicrypt.key`; a desinstalação remove configurações do plugin.
