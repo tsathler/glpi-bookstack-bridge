@@ -1,5 +1,34 @@
 # GLPI BookStack Bridge
 
+**Read-only BookStack knowledge-base integration for GLPI 11, with explicit access controls and guarded API connectivity.**
+
+> **Status:** M0 and M1.1 functionally validated on GLPI 11.0.4 with a real BookStack instance. Page-body reading, ticket linking, and multi-entity integration are **not complete**.
+
+## At a glance
+
+| Capability | Current state |
+| --- | --- |
+| Protected configuration and API check | Implemented and validated |
+| Experimental search | Implemented; restricted to configuration administrators |
+| Shelf, book, chapter, and page-title navigation | Implemented; follows GLPI Knowledge base read permission |
+| Page content reader and ticket linking | Not implemented |
+| Multi-entity persistence foundation | In progress; not connected to the UI |
+
+## Integration overview
+
+```text
+Authorized GLPI user
+        │ GLPI permissions
+        ▼
+GLPI 11 plugin ── HTTPS / read-only API ──► BookStack
+        │
+        └── guarded destination policy and protected credentials
+```
+
+**Security considerations:** HTTPS verification remains enabled; private IP destinations require an explicit exact-address allowlist. The dedicated BookStack API account determines the content scope available to authorized GLPI readers. Review [network configuration](docs/network-configuration.md) before connecting an internal destination.
+
+---
+
 GLPI 11 plugin for an authenticated, read-only connection to the BookStack REST API. M0 includes protected connection settings, an API connectivity check, and experimental search. M1.1 adds read-only structural navigation of shelves, books, chapters, and page titles. Settings, API check, and experimental search require GLPI configuration update rights; structural navigation requires the native GLPI Knowledge base read right.
 
 ## Requirements
